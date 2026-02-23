@@ -9,16 +9,16 @@
 }
 
 /* ── Theme-aware scrollbar ──────────────────────────────────────────────── */
-.terminal-scroll::-webkit-scrollbar {
+::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
-.terminal-scroll::-webkit-scrollbar-track {
+::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.terminal-scroll::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-thumb {
   background: var(--df-scroll-thumb, #30363d);
   border-radius: 10px;
 }
