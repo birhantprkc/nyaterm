@@ -127,6 +127,44 @@ impl client::Handler for SshHandler {
     }
 }
 
+pub async fn connect_with_proxy(
+    app: &AppHandle,
+    config: &SshConfig,
+    ssh_config: Arc<client::Config>,
+    handler: SshHandler,
+) -> AppResult<client::Handle<SshHandler>> {
+    let mut proxy_settings = None;
+    if let Ok(app_settings) = crate::config::load_app_settings(app) {
+        if app_settings.proxy.enabled {
+            proxy_settings = Some(app_settings.proxy);
+        }
+    }
+
+    let target = (config.host.as_str(), config.port);
+    let handle = if let Some(proxy) = proxy_settings {
+        let proxy_addr = format!("{}:{}", proxy.host, proxy.port);
+        match proxy.protocol.as_str() {
+            "socks5" => {
+                let stream = tokio_socks::tcp::Socks5Stream::connect(proxy_addr.as_str(), target).await
+                    .map_err(|e| AppError::Auth(format!("SOCKS5 proxy connection failed: {}", e)))?;
+                client::connect_stream(ssh_config, stream.into_inner(), handler).await
+            }
+            "http" => {
+                let mut stream = tokio::net::TcpStream::connect(&proxy_addr).await
+                    .map_err(|e| AppError::Auth(format!("HTTP proxy connection failed: {}", e)))?;
+                async_http_proxy::http_connect_tokio(&mut stream, &config.host, config.port).await
+                    .map_err(|e| AppError::Auth(format!("HTTP proxy tunnel failed: {}", e)))?;
+                client::connect_stream(ssh_config, stream, handler).await
+            }
+            _ => client::connect(ssh_config, target, handler).await,
+        }
+    } else {
+        client::connect(ssh_config, target, handler).await
+    }.map_err(|e| AppError::Auth(format!("SSH connection failed: {}", e)))?;
+
+    Ok(handle)
+}
+
 /// Connects via SSH, opens a PTY shell, and spawns the I/O loop.
 pub async fn create_ssh_session(
     app: AppHandle,
@@ -137,12 +175,17 @@ pub async fn create_ssh_session(
     let session_id = uuid::Uuid::new_v4().to_string();
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SessionCommand>();
 
-    let ssh_config = Arc::new(client::Config::default());
+    let mut ssh_config_obj = client::Config::default();
+    if let Ok(app_settings) = crate::config::load_app_settings(&app) {
+        let interval = app_settings.terminal.keep_alive_interval;
+        if interval > 0 {
+            ssh_config_obj.keepalive_interval = Some(std::time::Duration::from_secs(interval as u64));
+        }
+    }
+    let ssh_config = Arc::new(ssh_config_obj);
     let handler = SshHandler::new(app.clone(), config.host.clone(), config.port);
 
-    let mut handle = client::connect(ssh_config, (config.host.as_str(), config.port), handler)
-        .await
-        .map_err(|e| AppError::Auth(format!("SSH connection failed: {}", e)))?;
+    let mut handle = connect_with_proxy(&app, &config, ssh_config, handler).await?;
 
     match &config.auth {
         SshAuth::Password { password } => {

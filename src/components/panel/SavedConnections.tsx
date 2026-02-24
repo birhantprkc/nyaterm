@@ -8,7 +8,7 @@ import { useToast } from "../toast/ToastContext";
 
 interface SavedConnectionsProps {
   onEditConnection: (connection: SavedConnection) => void;
-  onSessionCreated: (sessionId: string, name: string, type: SessionType) => void;
+  onSessionCreated: (sessionId: string, name: string, type: SessionType, connectionId?: string) => void;
 }
 
 interface HoverInfo {
@@ -69,7 +69,7 @@ export default function SavedConnections({
     setConnectingId(conn.id);
     try {
       const sessionId = await invoke<string>("create_ssh_session", { connectionId: conn.id });
-      onSessionCreated(sessionId, conn.name, "SSH");
+      onSessionCreated(sessionId, conn.name, "SSH", conn.id);
     } catch (e) {
       logger.error(`SSH connection failed for "${conn.name}"`, e);
       toast.error(t("savedConnections.connectionFailed", { error: e }));

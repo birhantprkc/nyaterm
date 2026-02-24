@@ -34,10 +34,10 @@ function applyThemeToDOM(colors: ThemeColors) {
   root.setProperty("--df-accent", colors.accent);
 }
 
-/** Provides theme, themeName, setTheme. Syncs with uiConfig.theme from backend. */
+/** Provides theme, themeName, setTheme. Syncs with appSettings.appearance.theme from backend. */
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const { uiConfig, updateUiConfig } = useApp();
-  const initialId = uiConfig.theme || DEFAULT_THEME_ID;
+  const { appSettings, updateAppSettings } = useApp();
+  const initialId = appSettings.appearance.theme || DEFAULT_THEME_ID;
   const [themeName, setThemeName] = useState(initialId);
 
   const current = themes[themeName] || themes[DEFAULT_THEME_ID];
@@ -47,21 +47,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     applyThemeToDOM(current.colors);
   }, [current]);
 
-  // Sync from backend when uiConfig.theme changes (e.g. on load)
+  // Sync from backend when appSettings.appearance.theme changes (e.g. on load or from Settings dialog)
   useEffect(() => {
-    if (uiConfig.theme && uiConfig.theme !== themeName && themes[uiConfig.theme]) {
-      setThemeName(uiConfig.theme);
+    const configTheme = appSettings.appearance.theme;
+    if (configTheme && configTheme !== themeName && themes[configTheme]) {
+      setThemeName(configTheme);
     }
-  }, [uiConfig.theme, themeName]);
+  }, [appSettings.appearance.theme, themeName]);
 
   const setTheme = useCallback(
     (id: string) => {
       if (themes[id]) {
         setThemeName(id);
-        updateUiConfig({ theme: id });
+        updateAppSettings({ appearance: { ...appSettings.appearance, theme: id } });
       }
     },
-    [updateUiConfig],
+    [appSettings.appearance, updateAppSettings],
   );
 
   return (

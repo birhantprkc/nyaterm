@@ -5,6 +5,7 @@ import { appLogDir } from "@tauri-apps/api/path";
 import packageJson from "../../../package.json";
 import { useApp } from "../../context/AppContext";
 import { useTheme } from "../../context/ThemeContext";
+import { AVAILABLE_LANGUAGES } from "../../i18n";
 
 interface HeaderProps {
   onNewSession: () => void;
@@ -29,7 +30,7 @@ export default function Header({
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { themeName, setTheme, themeNames } = useTheme();
-  const { uiConfig, updateUiConfig } = useApp();
+  const { uiConfig, updateUiConfig, setShowSettingsDialog } = useApp();
   const { t, i18n } = useTranslation();
 
   const changeLanguage = (lng: string) => {
@@ -117,10 +118,11 @@ export default function Header({
       {
         label: t("menu.language"),
         icon: "translate",
-        submenu: [
-          { label: "English", checked: i18n.language === "en", action: () => changeLanguage("en") },
-          { label: "中文", checked: i18n.language === "zh-CN", action: () => changeLanguage("zh-CN") },
-        ],
+        submenu: AVAILABLE_LANGUAGES.map((l) => ({
+          label: l.name,
+          checked: i18n.language === l.id,
+          action: () => changeLanguage(l.id)
+        })),
       },
       { label: "separator", separator: true },
       { label: t("menu.zoomIn"), action: () => handleZoom(0.1), icon: "zoom_in" },
@@ -227,10 +229,10 @@ export default function Header({
           <span className="material-icons text-base">view_sidebar</span>
         </button>
 
-        <span className="material-icons text-base cursor-pointer hover:opacity-80 transition-opacity hidden sm:block">
-          search
-        </span>
-        <span className="material-icons text-base cursor-pointer hover:opacity-80 transition-opacity hidden sm:block">
+        <span
+          className="material-icons text-base cursor-pointer hover:opacity-80 transition-opacity hidden sm:block"
+          onClick={() => setShowSettingsDialog(true)}
+        >
           settings
         </span>
       </div>

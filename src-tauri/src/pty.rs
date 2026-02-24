@@ -15,15 +15,41 @@ struct OutputBuffer {
     buffer: Vec<String>,
 }
 
-fn get_default_shell() -> CommandBuilder {
-    #[cfg(target_os = "windows")]
-    {
-        CommandBuilder::new("powershell.exe")
+fn get_default_shell(app: Option<&AppHandle>) -> CommandBuilder {
+    let mut shell_cmd = String::new();
+
+    if let Some(app) = app {
+        if let Ok(settings) = crate::config::load_app_settings(app) {
+            let user_shell = settings.general.default_local_shell;
+            if !user_shell.trim().is_empty() {
+                shell_cmd = user_shell;
+            }
+        }
     }
-    #[cfg(not(target_os = "windows"))]
-    {
-        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
-        CommandBuilder::new(shell)
+
+    if shell_cmd.is_empty() {
+        #[cfg(target_os = "windows")]
+        {
+            shell_cmd = "powershell.exe".to_string();
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            shell_cmd = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string());
+        }
+    }
+
+    let parts: Vec<&str> = shell_cmd.split_whitespace().collect();
+    if parts.is_empty() {
+        #[cfg(target_os = "windows")]
+        return CommandBuilder::new("powershell.exe");
+        #[cfg(not(target_os = "windows"))]
+        return CommandBuilder::new("/bin/bash");
+    } else {
+        let mut builder = CommandBuilder::new(parts[0]);
+        if parts.len() > 1 {
+            builder.args(&parts[1..]);
+        }
+        builder
     }
 }
 
@@ -86,7 +112,7 @@ fn pty_session_thread(
         }
     };
 
-    let cmd = get_default_shell();
+    let cmd = get_default_shell(Some(&app));
     let mut _child = match pair.slave.spawn_command(cmd) {
         Ok(c) => c,
         Err(e) => {

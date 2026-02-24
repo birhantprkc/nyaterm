@@ -108,6 +108,17 @@ export default function NewSessionDialog({
     }
   }, [open, initialData, resetForm]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && open && !connecting && !showGroupDropdown) {
+        resetForm();
+        onClose();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [open, connecting, showGroupDropdown, resetForm, onClose]);
+
   const handleClose = () => {
     resetForm();
     onClose();
