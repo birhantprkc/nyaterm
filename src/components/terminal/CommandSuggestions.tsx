@@ -2,6 +2,7 @@ import { memo, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MdFlashOn, MdHistory, MdTipsAndUpdates } from "react-icons/md";
 import type { FuzzyResult } from "@/types/global";
+import { Kbd } from "@/components/ui/kbd";
 
 interface CommandSuggestionsProps {
   suggestions: FuzzyResult[];
@@ -144,39 +145,36 @@ function CommandSuggestions({
         style={{ borderColor: "var(--df-border)", color: "var(--df-text-dimmed)" }}
       >
         <span>
-          <kbd
+          <Kbd
             className="px-1 py-0.5 rounded text-[0.5625rem]"
             style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}
           >
             ↑↓
-          </kbd>{" "}
+          </Kbd>{" "}
           {t("suggestions.select")}
         </span>
         <span>
-          <kbd
-            className="px-1 py-0.5 rounded text-[0.5625rem]"
-            style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}
-          >
+          <Kbd className="px-1 py-0.5 rounded text-[0.5625rem]" style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}>
             Enter
-          </kbd>{" "}
+          </Kbd>{" "}
           {t("suggestions.execute")}
         </span>
         <span>
-          <kbd
+          <Kbd
             className="px-1 py-0.5 rounded text-[0.5625rem]"
             style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}
           >
             Tab
-          </kbd>{" "}
+          </Kbd>{" "}
           {t("suggestions.fill")}
         </span>
         <span>
-          <kbd
+          <Kbd
             className="px-1 py-0.5 rounded text-[0.5625rem]"
             style={{ backgroundColor: "var(--df-bg-hover)", color: "var(--df-text-muted)" }}
           >
             Esc
-          </kbd>{" "}
+          </Kbd>{" "}
           {t("suggestions.dismiss")}
         </span>
       </div>

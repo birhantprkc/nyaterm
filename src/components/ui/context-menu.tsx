@@ -202,7 +202,7 @@ function ContextMenuShortcut({ className, children, ...props }: React.ComponentP
       className={cn("ml-auto text-xs tracking-widest", className)}
       {...props}
     >
-      <Kbd variant="outline" size="sm" className="font-sans text-[9px] text-muted-foreground/70 border-none bg-transparent px-0 shadow-none uppercase">
+      <Kbd className="font-sans text-[9px] text-muted-foreground/90 border-none bg-transparent px-0 shadow-none uppercase">
         {children}
       </Kbd>
     </span>
