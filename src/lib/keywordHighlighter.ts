@@ -1,4 +1,11 @@
-import type { IBufferLine, IDecoration, IDisposable, IMarker, Terminal as XTerm } from "@xterm/xterm";
+import type {
+  IBufferCell,
+  IBufferLine,
+  IDecoration,
+  IDisposable,
+  IMarker,
+  Terminal as XTerm,
+} from "@xterm/xterm";
 import type { ResolvedHighlightRule } from "./keywordHighlightPresets";
 import { XTERM_PERFORMANCE_CONFIG } from "./xtermPerformance";
 
@@ -12,26 +19,50 @@ interface CachedDecoration {
   marker: IMarker;
 }
 
+interface LogicalLineSegment {
+  line: IBufferLine;
+  lineY: number;
+  text: string;
+  startIndex: number;
+  endIndex: number;
+  cellMap: number[] | null;
+}
+
 /**
  * Manages terminal decorations for keyword highlighting.
  *
  * Optimizations over a naive implementation:
- * - Decoration caching: reuses existing IDecoration/IMarker objects for lines that
- *   remain visible between viewport refreshes instead of dispose+recreate on every scroll.
+ * - Overscan buffer: keeps decorations alive for OVERSCAN_LINES rows above/below the
+ *   viewport, eliminating highlight loss when scrolling back to recently-visited rows.
+ * - Scanned-line memoization: scrollback content is immutable once written, so each line
+ *   or fully-scrollback wrapped logical line is regex-matched exactly once. Subsequent
+ *   passes just copy existing keys into requiredKeys without re-running regex/cell scans.
  * - Fast ASCII path: skips building the wide-char cell map for lines with only ASCII chars.
  * - Deduplicates scroll/render events: onRender viewport-Y check replaces the redundant onScroll.
- * - Auto-invalidation: each decoration subscribes to its own onDispose so the cache stays
- *   consistent when xterm evicts lines that scroll off the scrollback buffer.
+ * - Auto-invalidation: each decoration subscribes to its own onDispose so the cache and the
+ *   per-line index stay consistent when xterm evicts lines from the scrollback buffer.
  * - Alternate buffer guard: clears decorations immediately when TUI apps (vim, htop) take over.
  */
 export class KeywordHighlighter implements IDisposable {
   private term: XTerm;
   private compiledRules: CompiledRule[] = [];
   private decorationCache = new Map<string, CachedDecoration>();
+  /** Maps absolute buffer line index → decoration keys on that line. */
+  private lineToKeys = new Map<number, string[]>();
+  /** Lines that have been fully scanned and whose results are memoized in lineToKeys. */
+  private scannedLines = new Set<number>();
   private debounceTimer: ReturnType<typeof setTimeout> | null = null;
   private enabled = false;
+  private highlightAcrossWrappedLines = false;
   private disposables: IDisposable[] = [];
   private lastViewportY = -1;
+
+  /**
+   * How many lines above and below the visible viewport to keep decorated.
+   * Large enough to absorb typical keyboard/mouse scroll bursts without flicker,
+   * small enough to bound memory usage on large scrollback buffers.
+   */
+  private static readonly OVERSCAN_LINES = 200;
 
   constructor(term: XTerm) {
     this.term = term;
@@ -54,8 +85,13 @@ export class KeywordHighlighter implements IDisposable {
     );
   }
 
-  public setRules(rules: ResolvedHighlightRule[], enabled: boolean): void {
+  public setRules(
+    rules: ResolvedHighlightRule[],
+    enabled: boolean,
+    highlightAcrossWrappedLines = false,
+  ): void {
     this.enabled = enabled;
+    this.highlightAcrossWrappedLines = highlightAcrossWrappedLines;
 
     this.compiledRules = [];
     for (const rule of rules) {
@@ -102,31 +138,31 @@ export class KeywordHighlighter implements IDisposable {
   /**
    * Clear map before disposing so the per-decoration onDispose callbacks find
    * an empty map and become no-ops, avoiding re-entrant mutation.
+   * Also resets the scanned-line memoization so all lines are re-scanned after
+   * a rule change.
    */
   private clearAllDecorations(): void {
     const entries = [...this.decorationCache.values()];
     this.decorationCache.clear();
+    this.lineToKeys.clear();
+    this.scannedLines.clear();
     for (const { decoration, marker } of entries) {
       decoration.dispose();
       marker.dispose();
     }
   }
 
-  /**
-   * Build a string-index → cell-column map for lines that contain multibyte
-   * characters (CJK, emoji, combining). For ASCII-only lines this is skipped.
-   *
-   * Example: "A中B"
-   *   String indices:  0='A'  1='中'  2='B'
-   *   Cell columns:    0      1(w=2)  3
-   *   map → [0, 1, 3, 4]  (sentinel at end for calculating match width)
-   */
-  private buildStringToCellMap(line: IBufferLine): number[] {
+  private buildStringToCellMap(
+    line: IBufferLine,
+    stringLength: number,
+    maxCols: number,
+    scratchCell: IBufferCell,
+  ): number[] {
     const map: number[] = [];
-    let cellCol = 0;
+    let cellEndCol = 0;
 
-    for (let col = 0; col < line.length; col++) {
-      const cell = line.getCell(col);
+    for (let col = 0; col < maxCols && map.length < stringLength; col++) {
+      const cell = line.getCell(col, scratchCell);
       if (!cell) break;
 
       const chars = cell.getChars();
@@ -134,13 +170,281 @@ export class KeywordHighlighter implements IDisposable {
       if (width === 0) continue; // continuation cell of a wide char
 
       for (let i = 0; i < chars.length; i++) {
-        map.push(cellCol);
+        map.push(col);
       }
-      cellCol += width;
+      cellEndCol = col + width;
     }
 
-    map.push(cellCol); // sentinel: end position
+    map.push(cellEndCol); // sentinel: end position
     return map;
+  }
+
+  private getLogicalLineBounds(
+    buffer: XTerm["buffer"]["active"],
+    lineY: number,
+    totalLines: number,
+  ): { startY: number; endY: number } {
+    let startY = lineY;
+    while (startY > 0) {
+      const currentLine = buffer.getLine(startY);
+      if (!currentLine?.isWrapped) break;
+      startY--;
+    }
+
+    let endY = lineY;
+    while (endY + 1 < totalLines) {
+      const nextLine = buffer.getLine(endY + 1);
+      if (!nextLine?.isWrapped) break;
+      endY++;
+    }
+
+    return { startY, endY };
+  }
+
+  private ensureDecoration(
+    lineY: number,
+    cellStartCol: number,
+    cellWidth: number,
+    color: string,
+    cursorAbsoluteY: number,
+  ): string | null {
+    if (cellWidth <= 0) return null;
+
+    const key = `${lineY}:${cellStartCol}:${cellWidth}:${color}`;
+    if (this.decorationCache.has(key)) return key;
+
+    const offset = lineY - cursorAbsoluteY;
+    const marker = this.term.registerMarker(offset);
+    if (!marker) return null;
+
+    const deco = this.term.registerDecoration({
+      marker,
+      x: cellStartCol,
+      width: cellWidth,
+      foregroundColor: color,
+    });
+
+    if (!deco) {
+      marker.dispose();
+      return null;
+    }
+
+    deco.onRender((element: HTMLElement) => {
+      element.style.pointerEvents = "none";
+    });
+
+    // Auto-remove from cache and line index when xterm evicts the line
+    deco.onDispose(() => {
+      this.decorationCache.delete(key);
+      // Remove from line index so the line gets re-scanned if it reappears
+      const keys = this.lineToKeys.get(lineY);
+      if (keys) {
+        const filtered = keys.filter((k) => k !== key);
+        if (filtered.length === 0) {
+          this.lineToKeys.delete(lineY);
+          this.scannedLines.delete(lineY);
+        } else {
+          this.lineToKeys.set(lineY, filtered);
+        }
+      }
+    });
+
+    this.decorationCache.set(key, { decoration: deco, marker });
+    return key;
+  }
+
+  private scanPhysicalLine(
+    line: IBufferLine,
+    lineY: number,
+    cursorAbsoluteY: number,
+    requiredKeys: Set<string>,
+    scratchCell: IBufferCell,
+  ): string[] {
+    const maxCols = Math.min(line.length, this.term.cols);
+    const lineText = line.translateToString(true, 0, maxCols);
+    if (!lineText) return [];
+
+    // Only build the wide-char map if actually needed (non-ASCII present)
+    const hasMultibyte = /[^\u0000-\u00FF]/.test(lineText);
+    const cellMap = hasMultibyte
+      ? this.buildStringToCellMap(line, lineText.length, maxCols, scratchCell)
+      : null;
+
+    // Track occupied characters in the string to prevent multi-rule overlapping
+    const occupied = new Uint8Array(lineText.length);
+
+    // Pre-fill occupied array with cells that already have a custom foreground color
+    // so we don't override the original shell output colors (e.g. from `ls --color`).
+    for (let i = 0; i < lineText.length; i++) {
+      const cellCol = cellMap ? (cellMap[i] ?? i) : i;
+      const cell = line.getCell(cellCol, scratchCell);
+      if (cell && !cell.isFgDefault()) {
+        occupied[i] = 1;
+      }
+    }
+
+    const lineKeys: string[] = [];
+
+    for (const { regex, color } of this.compiledRules) {
+      regex.lastIndex = 0;
+      let match: RegExpExecArray | null;
+
+      while ((match = regex.exec(lineText)) !== null) {
+        // Avoid infinite loops on empty matches
+        if (match[0].length === 0) {
+          regex.lastIndex++;
+          continue;
+        }
+
+        const strStart = match.index;
+        const strEnd = strStart + match[0].length;
+
+        // Check for collision with higher-priority matches or existing ANSI colors
+        let isOverlapping = false;
+        for (let k = strStart; k < strEnd; k++) {
+          if (occupied[k]) {
+            isOverlapping = true;
+            break;
+          }
+        }
+        if (isOverlapping) continue;
+
+        // Mark as occupied
+        for (let k = strStart; k < strEnd; k++) {
+          occupied[k] = 1;
+        }
+
+        const cellStartCol = cellMap ? (cellMap[strStart] ?? strStart) : strStart;
+        const cellEndCol = cellMap ? (cellMap[strEnd] ?? strEnd) : strEnd;
+        const key = this.ensureDecoration(
+          lineY,
+          cellStartCol,
+          cellEndCol - cellStartCol,
+          color,
+          cursorAbsoluteY,
+        );
+        if (!key) continue;
+
+        requiredKeys.add(key);
+        lineKeys.push(key);
+      }
+    }
+
+    return lineKeys;
+  }
+
+  private scanWrappedLogicalLine(
+    buffer: XTerm["buffer"]["active"],
+    startY: number,
+    endY: number,
+    scanStart: number,
+    scanEnd: number,
+    cursorAbsoluteY: number,
+    requiredKeys: Set<string>,
+    scratchCell: IBufferCell,
+  ): Map<number, string[]> {
+    const segments: LogicalLineSegment[] = [];
+    let logicalLength = 0;
+
+    for (let currentY = startY; currentY <= endY; currentY++) {
+      const line = buffer.getLine(currentY);
+      if (!line) continue;
+
+      const maxCols = Math.min(line.length, this.term.cols);
+      const text = line.translateToString(currentY === endY, 0, maxCols);
+      const startIndex = logicalLength;
+      logicalLength += text.length;
+
+      segments.push({
+        line,
+        lineY: currentY,
+        text,
+        startIndex,
+        endIndex: logicalLength,
+        cellMap:
+          /[^\u0000-\u00FF]/.test(text) && text.length > 0
+            ? this.buildStringToCellMap(line, text.length, maxCols, scratchCell)
+            : null,
+      });
+    }
+
+    if (logicalLength === 0) return new Map();
+
+    const logicalText = segments.map((segment) => segment.text).join("");
+    const occupied = new Uint8Array(logicalText.length);
+
+    for (const segment of segments) {
+      for (let i = 0; i < segment.text.length; i++) {
+        const cellCol = segment.cellMap ? (segment.cellMap[i] ?? i) : i;
+        const cell = segment.line.getCell(cellCol, scratchCell);
+        if (cell && !cell.isFgDefault()) {
+          occupied[segment.startIndex + i] = 1;
+        }
+      }
+    }
+
+    const lineKeysByLine = new Map<number, string[]>();
+
+    for (const { regex, color } of this.compiledRules) {
+      regex.lastIndex = 0;
+      let match: RegExpExecArray | null;
+
+      while ((match = regex.exec(logicalText)) !== null) {
+        if (match[0].length === 0) {
+          regex.lastIndex++;
+          continue;
+        }
+
+        const strStart = match.index;
+        const strEnd = strStart + match[0].length;
+
+        let isOverlapping = false;
+        for (let k = strStart; k < strEnd; k++) {
+          if (occupied[k]) {
+            isOverlapping = true;
+            break;
+          }
+        }
+        if (isOverlapping) continue;
+
+        for (let k = strStart; k < strEnd; k++) {
+          occupied[k] = 1;
+        }
+
+        for (const segment of segments) {
+          if (segment.lineY < scanStart || segment.lineY > scanEnd) continue;
+          if (segment.endIndex <= strStart || segment.startIndex >= strEnd) continue;
+
+          const localStart = Math.max(strStart, segment.startIndex) - segment.startIndex;
+          const localEnd = Math.min(strEnd, segment.endIndex) - segment.startIndex;
+          if (localEnd <= localStart) continue;
+
+          const cellStartCol = segment.cellMap
+            ? (segment.cellMap[localStart] ?? localStart)
+            : localStart;
+          const cellEndCol = segment.cellMap ? (segment.cellMap[localEnd] ?? localEnd) : localEnd;
+          const key = this.ensureDecoration(
+            segment.lineY,
+            cellStartCol,
+            cellEndCol - cellStartCol,
+            color,
+            cursorAbsoluteY,
+          );
+          if (!key) continue;
+
+          requiredKeys.add(key);
+
+          const lineKeys = lineKeysByLine.get(segment.lineY);
+          if (lineKeys) {
+            lineKeys.push(key);
+          } else {
+            lineKeysByLine.set(segment.lineY, [key]);
+          }
+        }
+      }
+    }
+
+    return lineKeysByLine;
   }
 
   private refreshViewport(): void {
@@ -150,117 +454,101 @@ export class KeywordHighlighter implements IDisposable {
     const viewportY = buffer.viewportY;
     const rows = this.term.rows;
     const cursorAbsoluteY = buffer.baseY + buffer.cursorY;
+    const totalLines = buffer.length;
+    // Lines below this index are in the scrollback and are immutable.
+    // Lines on the current screen (>= screenStartY) may still change via escape sequences.
+    const screenStartY = buffer.baseY;
+
+    // Expand the active zone with overscan so decorations survive typical scroll bursts
+    // without being destroyed and recreated, eliminating highlight flicker.
+    const scanStart = Math.max(0, viewportY - KeywordHighlighter.OVERSCAN_LINES);
+    const scanEnd = Math.min(totalLines - 1, viewportY + rows - 1 + KeywordHighlighter.OVERSCAN_LINES);
 
     const requiredKeys = new Set<string>();
+    const scratchCell = buffer.getNullCell();
+    const processedLogicalStarts = new Set<number>();
 
-    for (let y = 0; y < rows; y++) {
-      const lineY = viewportY + y;
+    for (let lineY = scanStart; lineY <= scanEnd; lineY++) {
       const line = buffer.getLine(lineY);
       if (!line) continue;
 
-      const lineText = line.translateToString(true);
-      if (!lineText) continue;
-
-      // Only build the wide-char map if actually needed (non-ASCII present)
-      const hasMultibyte = /[^\u0000-\u00FF]/.test(lineText);
-      let cellMap: number[] | null = null;
-      if (hasMultibyte) {
-        cellMap = this.buildStringToCellMap(line);
-      }
-
-      // Track occupied characters in the string to prevent multi-rule overlapping
-      const occupied = new Uint8Array(lineText.length);
-
-      // Pre-fill occupied array with cells that already have a custom foreground color
-      // so we don't override the original shell output colors (e.g. from `ls --color`).
-      for (let i = 0; i < lineText.length; i++) {
-        const cellCol = cellMap ? (cellMap[i] ?? i) : i;
-        const cell = line.getCell(cellCol);
-        if (cell && !cell.isFgDefault()) {
-          occupied[i] = 1;
+      if (!this.highlightAcrossWrappedLines) {
+        // Scrollback lines (lineY < screenStartY) are immutable once written.
+        // Re-use the memoized match result to avoid re-running regex + cell reads.
+        // Screen lines (lineY >= screenStartY) can still be modified, always re-scan them.
+        if (lineY < screenStartY && this.scannedLines.has(lineY)) {
+          const cached = this.lineToKeys.get(lineY);
+          if (cached) {
+            for (const k of cached) requiredKeys.add(k);
+          }
+          continue;
         }
+
+        const lineKeys = this.scanPhysicalLine(
+          line,
+          lineY,
+          cursorAbsoluteY,
+          requiredKeys,
+          scratchCell,
+        );
+
+        // Only memoize scrollback lines — screen lines remain mutable
+        if (lineY < screenStartY) {
+          this.scannedLines.add(lineY);
+          if (lineKeys.length > 0) {
+            this.lineToKeys.set(lineY, lineKeys);
+          } else {
+            this.lineToKeys.delete(lineY);
+          }
+        }
+        continue;
       }
 
-      for (const { regex, color } of this.compiledRules) {
-        regex.lastIndex = 0;
-        let match: RegExpExecArray | null;
+      const { startY, endY } = this.getLogicalLineBounds(buffer, lineY, totalLines);
+      const canMemoize = endY < screenStartY;
 
-        while ((match = regex.exec(lineText)) !== null) {
-          // Avoid infinite loops on empty matches
-          if (match[0].length === 0) {
-            regex.lastIndex++;
-            continue;
-          }
+      if (canMemoize && this.scannedLines.has(lineY)) {
+        const cached = this.lineToKeys.get(lineY);
+        if (cached) {
+          for (const k of cached) requiredKeys.add(k);
+        }
+        continue;
+      }
 
-          const strStart = match.index;
-          const strEnd = strStart + match[0].length;
+      // Wrapped-line mode can span multiple physical lines, so a logical line that
+      // touches the live screen cannot be memoized by individual scrollback rows.
+      if (!canMemoize && processedLogicalStarts.has(startY)) continue;
+      if (!canMemoize) {
+        processedLogicalStarts.add(startY);
+      }
 
-          // Check for collision with higher-priority matches or existing ANSI colors
-          let isOverlapping = false;
-          for (let k = strStart; k < strEnd; k++) {
-            if (occupied[k]) {
-              isOverlapping = true;
-              break;
-            }
-          }
-          if (isOverlapping) continue;
+      const lineKeysByLine = this.scanWrappedLogicalLine(
+        buffer,
+        startY,
+        endY,
+        scanStart,
+        scanEnd,
+        cursorAbsoluteY,
+        requiredKeys,
+        scratchCell,
+      );
 
-          // Mark as occupied
-          for (let k = strStart; k < strEnd; k++) {
-            occupied[k] = 1;
-          }
-
-          let cellStartCol: number;
-          let cellEndCol: number;
-
-          if (hasMultibyte) {
-            cellStartCol = cellMap![strStart] ?? strStart;
-            cellEndCol = cellMap![strEnd] ?? strEnd;
+      if (canMemoize) {
+        for (let memoY = Math.max(startY, scanStart); memoY <= Math.min(endY, scanEnd); memoY++) {
+          this.scannedLines.add(memoY);
+          const lineKeys = lineKeysByLine.get(memoY);
+          if (lineKeys && lineKeys.length > 0) {
+            this.lineToKeys.set(memoY, lineKeys);
           } else {
-            cellStartCol = match.index;
-            cellEndCol = match.index + match[0].length;
-          }
-
-          const cellWidth = cellEndCol - cellStartCol;
-          if (cellWidth <= 0) continue;
-
-          const key = `${lineY}:${cellStartCol}:${cellWidth}:${color}`;
-          requiredKeys.add(key);
-
-          if (!this.decorationCache.has(key)) {
-            const offset = lineY - cursorAbsoluteY;
-            const marker = this.term.registerMarker(offset);
-            if (!marker) continue;
-
-            const deco = this.term.registerDecoration({
-              marker,
-              x: cellStartCol,
-              width: cellWidth,
-              foregroundColor: color,
-            });
-
-            if (deco) {
-              // Add a fallback background highlight for the DOM renderer.
-              // WebGL renderer will natively apply foregroundColor.
-              deco.onRender((element: HTMLElement) => {
-                // element.style.backgroundColor = color;
-                // element.style.opacity = "0.2";
-                element.style.pointerEvents = "none";
-              });
-
-              // Auto-remove from cache when xterm evicts the line from scrollback
-              deco.onDispose(() => this.decorationCache.delete(key));
-              this.decorationCache.set(key, { decoration: deco, marker });
-            } else {
-              marker.dispose();
-            }
+            this.lineToKeys.delete(memoY);
           }
         }
       }
     }
 
-    // Dispose decorations that are no longer in the visible viewport.
-    // Collect stale keys first to avoid mutating the map while iterating.
+    // Evict decorations that have drifted outside the overscan zone.
+    // Lines within [scanStart, scanEnd] are always in requiredKeys (content is immutable),
+    // so anything missing from requiredKeys belongs to a line that has left the zone.
     const staleKeys: string[] = [];
     for (const key of this.decorationCache.keys()) {
       if (!requiredKeys.has(key)) staleKeys.push(key);
@@ -271,6 +559,15 @@ export class KeywordHighlighter implements IDisposable {
         this.decorationCache.delete(key); // remove before dispose to silence onDispose no-op
         entry.decoration.dispose();
         entry.marker.dispose();
+      }
+    }
+
+    // Also evict the line-index entries for lines now outside the zone so they
+    // are re-scanned if the user scrolls back to them later.
+    for (const lineY of this.scannedLines) {
+      if (lineY < scanStart || lineY > scanEnd) {
+        this.scannedLines.delete(lineY);
+        this.lineToKeys.delete(lineY);
       }
     }
   }

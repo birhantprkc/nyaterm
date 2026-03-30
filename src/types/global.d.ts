@@ -228,6 +228,7 @@ export interface TerminalSettings {
   keep_alive_interval: number;
   hardware_acceleration: boolean;
   keyword_highlights_enabled: boolean;
+  keyword_highlights_across_wrapped_lines: boolean;
   keyword_highlights: KeywordHighlightRule[];
 }
 

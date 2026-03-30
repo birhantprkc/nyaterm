@@ -47,6 +47,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     keep_alive_interval: 60,
     hardware_acceleration: false,
     keyword_highlights_enabled: true,
+    keyword_highlights_across_wrapped_lines: false,
     keyword_highlights: [],
   },
   interaction: {

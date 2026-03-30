@@ -248,6 +248,8 @@ pub struct TerminalSettings {
     pub hardware_acceleration: bool,
     #[serde(default = "default_true")]
     pub keyword_highlights_enabled: bool,
+    #[serde(default = "default_false")]
+    pub keyword_highlights_across_wrapped_lines: bool,
     #[serde(default)]
     pub keyword_highlights: Vec<KeywordHighlightRule>,
 }
@@ -266,6 +268,7 @@ impl Default for TerminalSettings {
             keep_alive_interval: default_keep_alive(),
             hardware_acceleration: false,
             keyword_highlights_enabled: true,
+            keyword_highlights_across_wrapped_lines: false,
             keyword_highlights: Vec::new(),
         }
     }

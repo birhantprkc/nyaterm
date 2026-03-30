@@ -47,7 +47,11 @@ export function useKeywordHighlighter(
     if (!term) return;
 
     const highlighter = new KeywordHighlighter(term);
-    highlighter.setRules(mergedRules, appSettings.terminal.keyword_highlights_enabled ?? true);
+    highlighter.setRules(
+      mergedRules,
+      appSettings.terminal.keyword_highlights_enabled ?? true,
+      appSettings.terminal.keyword_highlights_across_wrapped_lines ?? false,
+    );
     highlighterRef.current = highlighter;
 
     return () => {
@@ -61,6 +65,14 @@ export function useKeywordHighlighter(
   useEffect(() => {
     const highlighter = highlighterRef.current;
     if (!highlighter) return;
-    highlighter.setRules(mergedRules, appSettings.terminal.keyword_highlights_enabled ?? true);
-  }, [mergedRules, appSettings.terminal.keyword_highlights_enabled]);
+    highlighter.setRules(
+      mergedRules,
+      appSettings.terminal.keyword_highlights_enabled ?? true,
+      appSettings.terminal.keyword_highlights_across_wrapped_lines ?? false,
+    );
+  }, [
+    mergedRules,
+    appSettings.terminal.keyword_highlights_enabled,
+    appSettings.terminal.keyword_highlights_across_wrapped_lines,
+  ]);
 }
