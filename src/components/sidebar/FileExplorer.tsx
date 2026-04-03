@@ -23,7 +23,7 @@ import {
   MdUpload,
 } from "react-icons/md";
 import { toast } from "sonner";
-import AutoUploadDialog, { type AutoUploadDialogData } from "../dialog/file-explorer/AutoUploadDialog";
+import { openAutoUpload } from "@/lib/windowManager";
 import MoveDialog, { type MoveDialogData } from "../dialog/file-explorer/MoveDialog";
 import NewItemDialog, { type NewItemDialogData } from "../dialog/file-explorer/NewItemDialog";
 import NewSymlinkDialog, { type NewSymlinkDialogData } from "../dialog/file-explorer/NewSymlinkDialog";
@@ -73,14 +73,11 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
   const [moveDialogData, setMoveDialogData] = useState<MoveDialogData | null>(null);
   const [newItemDialogData, setNewItemDialogData] = useState<NewItemDialogData | null>(null);
   const [newSymlinkDialogData, setNewSymlinkDialogData] = useState<NewSymlinkDialogData | null>(null);
-  const [autoUploadDialogData, setAutoUploadDialogData] = useState<AutoUploadDialogData | null>(
-    null,
-  );
   const [propertiesDialogData, setPropertiesDialogData] = useState<PropertiesDialogData | null>(
     null,
   );
   const [autoSyncCwd, setAutoSyncCwd] = useState(false);
-  const [, setAlwaysUploadFiles] = useState<Set<string>>(new Set());
+  const alwaysUploadFilesRef = useRef<Set<string>>(new Set());
 
   const sessionCacheRef = useRef<Map<string, { files: FileEntry[]; currentPath: string; homeDir: string }>>(new Map());
   const prevSessionIdRef = useRef<string | null>(null);
@@ -93,30 +90,37 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
         const { session_id, local_path, remote_path } = e.payload;
         const watchKey = `${session_id}:${local_path}`;
 
-        setAlwaysUploadFiles((prev) => {
-          if (prev.has(watchKey)) {
-            // File was marked "Always list", just upload silently
-            invoke("upload_local_file", {
-              sessionId: session_id,
-              localPath: local_path,
-              remotePath: remote_path,
-            }).catch((err) => toast.error(String(err)));
-            return prev;
-          } else {
-            // Trigger the dialog
-            setAutoUploadDialogData({
-              sessionId: session_id,
-              localPath: local_path,
-              remotePath: remote_path,
-            });
-            return prev;
-          }
-        });
+        if (alwaysUploadFilesRef.current.has(watchKey)) {
+          // File was marked "Always list", just upload silently
+          invoke("upload_local_file", {
+            sessionId: session_id,
+            localPath: local_path,
+            remotePath: remote_path,
+          }).catch((err) => toast.error(String(err)));
+        } else {
+          // Trigger the window
+          openAutoUpload({
+            sessionId: session_id,
+            localPath: local_path,
+            remotePath: remote_path,
+          });
+        }
       },
+    );
+
+    const unlistenDecision = listen<{ sessionId: string; localPath: string; always: boolean }>(
+      "auto-upload-decision",
+      (e) => {
+        const { sessionId, localPath, always } = e.payload;
+        if (always) {
+          alwaysUploadFilesRef.current.add(`${sessionId}:${localPath}`);
+        }
+      }
     );
 
     return () => {
       unlisten.then((fn) => fn());
+      unlistenDecision.then((fn) => fn());
     };
   }, []);
 
@@ -200,38 +204,6 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
     };
   }, [activeSessionId]);
 
-  // Move Tauri listeners that do NOT rely on standard React side-effects to the top hook
-  useEffect(() => {
-    const unlisten = listen<{ session_id: string; local_path: string; remote_path: string }>(
-      "file-modified",
-      (e) => {
-        const { session_id, local_path, remote_path } = e.payload;
-        const watchKey = `${session_id}:${local_path}`;
-
-        setAlwaysUploadFiles((prev) => {
-          if (prev.has(watchKey)) {
-            invoke("upload_local_file", {
-              sessionId: session_id,
-              localPath: local_path,
-              remotePath: remote_path,
-            }).catch((err) => toast.error(String(err)));
-            return prev;
-          } else {
-            setAutoUploadDialogData({
-              sessionId: session_id,
-              localPath: local_path,
-              remotePath: remote_path,
-            });
-            return prev;
-          }
-        });
-      },
-    );
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, []);
 
   useEffect(() => {
     if (!activeSessionId || !currentPath) return;
@@ -791,17 +763,6 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
                 handleOpenDefault(mockEntry);
               }
             }
-          }}
-        />
-      )}
-
-      {autoUploadDialogData && (
-        <AutoUploadDialog
-          data={autoUploadDialogData}
-          onClose={() => setAutoUploadDialogData(null)}
-          onAlwaysUpload={(sessionId, localPath) => {
-            const key = `${sessionId}:${localPath}`;
-            setAlwaysUploadFiles((prev) => new Set([...prev, key]));
           }}
         />
       )}

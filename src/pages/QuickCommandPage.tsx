@@ -20,6 +20,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { QUICK_ICONS } from "@/components/icons";
+import { parseJsonSearchParam } from "@/lib/utils";
 import type { QuickCommand, QuickCommandCategory } from "@/types/global";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -42,7 +43,7 @@ export default function QuickCommandPage() {
   const { t } = useTranslation();
   const params = new URLSearchParams(window.location.search);
   const dataParam = params.get("data");
-  const initialData: QuickCommand | null = dataParam ? JSON.parse(decodeURIComponent(dataParam)) : null;
+  const initialData = parseJsonSearchParam<QuickCommand>(dataParam);
 
   const [savedCategories, setSavedCategories] = useState<QuickCommandCategory[]>([]);
   const [label, setLabel] = useState(initialData?.label || "");

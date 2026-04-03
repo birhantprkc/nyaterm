@@ -6,7 +6,8 @@
     "main",
     "settings",
     "new-session",
-    "quick-command"
+    "quick-command",
+    "auto-upload-*"
   ],
   "permissions": [
     "core:default",

@@ -7,6 +7,8 @@ interface ChildWindowOptions {
   url: string;
   width?: number;
   height?: number;
+  alwaysOnTop?: boolean;
+  resizable?: boolean;
 }
 
 export async function openChildWindow(opts: ChildWindowOptions) {
@@ -23,7 +25,8 @@ export async function openChildWindow(opts: ChildWindowOptions) {
     height: opts.height ?? 560,
     visible: false,
     center: true,
-    resizable: true,
+    resizable: opts.resizable ?? true,
+    alwaysOnTop: opts.alwaysOnTop ?? false,
   });
 }
 
@@ -62,5 +65,22 @@ export function openQuickCommand(editJson?: string) {
     url,
     width: 540,
     height: 640,
+  });
+}
+
+export function openAutoUpload(data: { sessionId: string; localPath: string; remotePath: string }) {
+  // Use a unique label for each upload dialog so multiple files modifying simultaneously don't conflict
+  // We use the local path base64 (or just random) to make it unique per file
+  const safePath = btoa(encodeURIComponent(data.localPath)).replace(/[^a-zA-Z0-9]/g, "");
+  const label = `auto-upload-${safePath}`;
+  const url = `index.html?window=auto-upload&data=${encodeURIComponent(JSON.stringify(data))}`;
+  return openChildWindow({
+    label,
+    title: i18n.t("fileExplorer.fileModified"),
+    url,
+    width: 440,
+    height: 240,
+    resizable: false,
+    alwaysOnTop: true,
   });
 }

@@ -17,7 +17,9 @@
     "deletingConfirm": "Are you sure you want to delete '{{name}}'?",
     "deletingConfirmDesc": "This action cannot be undone.",
     "deletingSuccess": "Deleted successfully!",
-    "deletingFailed": "Deletion failed: {{error}}"
+    "deletingFailed": "Deletion failed: {{error}}",
+    "unknownWindowType": "Unknown window type",
+    "loading": "Loading..."
   },
   "menu": {
     "file": "File",
@@ -195,7 +197,11 @@
     "properties": "Properties",
     "syncTerminalPath": "Sync from Terminal",
     "autoSyncTerminalPath": "Auto Sync from Terminal",
-    "syncFailed": "Failed to sync terminal path"
+    "syncFailed": "Failed to sync terminal path",
+    "fileModified": "File modified",
+    "uploadPrompt": "The remote file has been modified. Would you like to upload the changes?",
+    "alwaysUpload": "Always upload",
+    "uploadOnce": "Upload Once"
   },
   "quickCommands": {
     "label": "Label",

@@ -17,7 +17,9 @@
     "deletingConfirm": "确定要删除“{{name}}”吗？",
     "deletingConfirmDesc": "此操作不可撤销。",
     "deletingSuccess": "删除成功！",
-    "deletingFailed": "删除失败：{{error}}"
+    "deletingFailed": "删除失败：{{error}}",
+    "unknownWindowType": "未知窗口类型",
+    "loading": "加载中..."
   },
   "menu": {
     "file": "文件",
@@ -195,7 +197,11 @@
     "properties": "属性",
     "syncTerminalPath": "同步终端路径",
     "autoSyncTerminalPath": "自动同步终端路径",
-    "syncFailed": "同步终端路径失败"
+    "syncFailed": "同步终端路径失败",
+    "fileModified": "文件已修改",
+    "uploadPrompt": "远程文件已修改，是否上传更改？",
+    "alwaysUpload": "总是上传",
+    "uploadOnce": "上传一次"
   },
   "quickCommands": {
     "label": "标签",

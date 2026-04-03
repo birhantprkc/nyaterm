@@ -28,7 +28,7 @@ const windowType = params.get("window");
 if (windowType) {
   // Child window: lightweight provider stack, no full App
   const { ChildAppProvider } = await import("./context/ChildAppProvider");
-  const { default: ChildWindowRouter } = await import("./lib/ChildWindowRouter");
+  const { default: ChildWindowRouter } = await import("./ChildWindowRouter");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
