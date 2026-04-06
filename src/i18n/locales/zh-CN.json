@@ -476,7 +476,7 @@
     "keywordHighlighting": "关键词高亮",
     "keywordHighlightingExperimental": "关键词高亮（实验性）",
     "keywordHighlightingDesc": "在终端匹配文本上叠加颜色。内置规则始终生效；自定义规则优先级更高。",
-    "keywordHighlightingExperimentalDesc": "在终端匹配文本上叠加颜色。内置规则始终生效；自定义规则优先级更高。这一个还未完善的实验性功能，请谨慎启用。",
+    "keywordHighlightingExperimentalDesc": "在终端匹配文本上叠加颜色。内置规则始终生效；自定义规则优先级更高。此为还未完善的实验性功能，请谨慎启用。",
     "keywordHighlightWrappedLines": "折行连续高亮",
     "keywordHighlightWrappedLinesDesc": "将自动换行的连续内容视为同一行，支持跨行匹配。开启后可能降低性能。",
     "keywordHighlightBuiltinRules": "内置规则",
