@@ -6,6 +6,7 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { SessionInfo } from "@/types/global";
 import {
   MdArrowUpward,
   MdContentCopy,
@@ -23,6 +24,7 @@ import {
   MdSyncLock,
   MdUpload,
 } from "react-icons/md";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
@@ -107,6 +109,7 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
     null,
   );
   const [autoSyncCwd, setAutoSyncCwd] = useState(false);
+  const [cwdTrackingActive, setCwdTrackingActive] = useState(false);
   const alwaysUploadFilesRef = useRef<Set<string>>(new Set());
   const filesRef = useRef<FileEntry[]>([]);
   const currentPathRef = useRef("");
@@ -122,6 +125,25 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
   filesRef.current = files;
   currentPathRef.current = currentPath;
   homeDirRef.current = homeDir;
+
+  // Resolve whether OSC7 shell integration (CWD tracking) is available for this session.
+  useEffect(() => {
+    if (!activeSessionId) {
+      setCwdTrackingActive(false);
+      return;
+    }
+    invoke<SessionInfo[]>("list_sessions")
+      .then((sessions) => {
+        const s = sessions.find((s) => s.id === activeSessionId);
+        const active = s?.injection_active ?? false;
+        setCwdTrackingActive(active);
+        if (!active) setAutoSyncCwd(false);
+      })
+      .catch(() => {
+        setCwdTrackingActive(false);
+        setAutoSyncCwd(false);
+      });
+  }, [activeSessionId]);
 
   useEffect(() => {
     const unlisten = listen<{ session_id: string; local_path: string; remote_path: string }>(
@@ -918,41 +940,77 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
             )}
           </div>
           <div className="flex items-center gap-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-              onClick={handleSyncCwd}
-              title={t("fileExplorer.syncTerminalPath")}
-            >
-              <MdSync className="h-[0.875rem] w-[0.875rem]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-6 w-6 rounded-md ${autoSyncCwd ? "text-primary" : "text-muted-foreground hover:text-foreground"}`}
-              onClick={() => setAutoSyncCwd((v) => !v)}
-              title={t("fileExplorer.autoSyncTerminalPath")}
-            >
-              <MdSyncLock className="h-[0.875rem] w-[0.875rem]" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
-              onClick={() => {
-                if (activeSessionId && currentPath) {
-                  invoke("write_to_session", {
-                    sessionId: activeSessionId,
-                    data: `${currentPath}`,
-                  });
-                  emit(`focus-terminal-${activeSessionId}`);
-                }
-              }}
-              title={t("fileExplorer.sendToTerminal")}
-            >
-              <MdSend className="h-[0.875rem] w-[0.875rem]" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground disabled:opacity-40 disabled:cursor-not-allowed"
+                    onClick={handleSyncCwd}
+                    disabled={!cwdTrackingActive}
+                  >
+                    <MdSync className="h-[0.875rem] w-[0.875rem]" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {cwdTrackingActive
+                  ? t("fileExplorer.syncTerminalPath")
+                  : t("fileExplorer.cwdTrackingUnavailable")}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className={`h-6 w-6 rounded-md disabled:opacity-40 disabled:cursor-not-allowed ${
+                      cwdTrackingActive
+                        ? autoSyncCwd
+                          ? "text-primary"
+                          : "text-muted-foreground hover:text-foreground"
+                        : "text-muted-foreground"
+                    }`}
+                    onClick={() => setAutoSyncCwd((v) => !v)}
+                    disabled={!cwdTrackingActive}
+                  >
+                    <MdSyncLock className="h-[0.875rem] w-[0.875rem]" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {cwdTrackingActive
+                  ? t("fileExplorer.autoSyncTerminalPath")
+                  : t("fileExplorer.cwdTrackingUnavailable")}
+              </TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-6 w-6 rounded-md text-muted-foreground hover:text-foreground"
+                    onClick={() => {
+                      if (activeSessionId && currentPath) {
+                        invoke("write_to_session", {
+                          sessionId: activeSessionId,
+                          data: `${currentPath}`,
+                        });
+                        emit(`focus-terminal-${activeSessionId}`);
+                      }
+                    }}
+                  >
+                    <MdSend className="h-[0.875rem] w-[0.875rem]" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {t("fileExplorer.sendToTerminal")}
+              </TooltipContent>
+            </Tooltip>
           </div>
         </div>
       )}

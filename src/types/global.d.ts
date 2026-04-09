@@ -7,6 +7,8 @@ export interface SessionInfo {
   name: string;
   session_type: SessionType;
   connected: boolean;
+  /** True when OSC 7 shell integration was injected. False for non-standard shells (JumpServer etc.). */
+  injection_active: boolean;
 }
 
 /** UI tab representing a terminal session. */
