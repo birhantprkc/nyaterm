@@ -11,6 +11,12 @@ import {
   MdSortByAlpha,
 } from "react-icons/md";
 import { toast } from "sonner";
+import ClearAllDialog from "@/components/dialog/connections/ClearAllDialog";
+import DeleteConnectionDialog from "@/components/dialog/connections/DeleteConnectionDialog";
+import DeleteFolderDialog from "@/components/dialog/connections/DeleteFolderDialog";
+import FolderDialog from "@/components/dialog/connections/FolderDialog";
+import ImportDialog from "@/components/dialog/connections/ImportDialog";
+import RenameConnectionDialog from "@/components/dialog/connections/RenameConnectionDialog";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,16 +27,10 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { Group, SavedConnection } from "@/types/global";
 import { useApp } from "@/context/AppContext";
 import { invoke } from "@/lib/invoke";
 import { logger } from "@/lib/logger";
-import ClearAllDialog from "@/components/dialog/connections/ClearAllDialog";
-import DeleteConnectionDialog from "@/components/dialog/connections/DeleteConnectionDialog";
-import DeleteFolderDialog from "@/components/dialog/connections/DeleteFolderDialog";
-import FolderDialog from "@/components/dialog/connections/FolderDialog";
-import ImportDialog from "@/components/dialog/connections/ImportDialog";
-import RenameConnectionDialog from "@/components/dialog/connections/RenameConnectionDialog";
+import type { Group, SavedConnection } from "@/types/global";
 import ConnectionItem from "./ConnectionItem";
 import type { SavedConnectionsContextValue } from "./context";
 import {
@@ -189,7 +189,6 @@ export default function SavedConnections({
   const handleConnect = async (conn: SavedConnection) => {
     if (connectingIdRef.current === conn.id) return;
     connectingIdRef.current = conn.id;
-
     const typeMap: Record<string, import("@/types/global").SessionType> = {
       ssh: "SSH",
       local_terminal: "Local",

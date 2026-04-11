@@ -6,7 +6,6 @@ import { openPath } from "@tauri-apps/plugin-opener";
 
 import { type ComponentProps, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import type { SessionInfo } from "@/types/global";
 import {
   MdArrowUpward,
   MdContentCopy,
@@ -24,8 +23,21 @@ import {
   MdSyncLock,
   MdUpload,
 } from "react-icons/md";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { toast } from "sonner";
+import DeleteDialog, {
+  type DeleteDialogData,
+} from "@/components/dialog/file-explorer/DeleteDialog";
+import MoveDialog, { type MoveDialogData } from "@/components/dialog/file-explorer/MoveDialog";
+import NewItemDialog, {
+  type NewItemDialogData,
+} from "@/components/dialog/file-explorer/NewItemDialog";
+import NewSymlinkDialog, {
+  type NewSymlinkDialogData,
+} from "@/components/dialog/file-explorer/NewSymlinkDialog";
+import PropertiesDialog, {
+  type PropertiesDialogData,
+} from "@/components/dialog/file-explorer/PropertiesDialog";
+import RenameDialog, { type RenameDialogData } from "@/components/dialog/file-explorer/RenameDialog";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
 import {
@@ -44,20 +56,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useApp } from "@/context/AppContext";
 import { formatSize } from "@/lib/utils";
 import { openAutoUpload } from "@/lib/windowManager";
-import type { FileEntry, FileExplorerProps } from "@/types/global";
-import DeleteDialog, { type DeleteDialogData } from "@/components/dialog/file-explorer/DeleteDialog";
-import MoveDialog, { type MoveDialogData } from "@/components/dialog/file-explorer/MoveDialog";
-import NewItemDialog, { type NewItemDialogData } from "@/components/dialog/file-explorer/NewItemDialog";
-import NewSymlinkDialog, {
-  type NewSymlinkDialogData,
-} from "@/components/dialog/file-explorer/NewSymlinkDialog";
-import PropertiesDialog, {
-  type PropertiesDialogData,
-} from "@/components/dialog/file-explorer/PropertiesDialog";
-import RenameDialog, { type RenameDialogData } from "@/components/dialog/file-explorer/RenameDialog";
+import type { FileEntry, FileExplorerProps, SessionInfo } from "@/types/global";
 import { FileListItem } from "./FileListItem";
 
 interface TransferEventPayload {
@@ -149,7 +152,7 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
   currentPathRef.current = currentPath;
   homeDirRef.current = homeDir;
 
-  // Resolve whether OSC7 shell integration (CWD tracking) is available for this session.
+  // Resolve whether backend terminal-path tracking is available for this session.
   useEffect(() => {
     if (!activeSessionId) {
       setCwdTrackingActive(false);
@@ -637,13 +640,7 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
     try {
       const tDir = await tempDir();
       const downloadTimestamp = Date.now().toString();
-      localPath = await join(
-        tDir,
-        "dragonfly",
-        activeSessionId,
-        downloadTimestamp,
-        entry.name,
-      );
+      localPath = await join(tDir, "dragonfly", activeSessionId, downloadTimestamp, entry.name);
       await invoke("download_remote_file", {
         sessionId: activeSessionId,
         remotePath: getEntryFullPath(entry),
@@ -1038,9 +1035,7 @@ export default function FileExplorer({ activeSessionId }: FileExplorerProps) {
                   </Button>
                 </span>
               </TooltipTrigger>
-              <TooltipContent side="top">
-                {t("fileExplorer.sendToTerminal")}
-              </TooltipContent>
+              <TooltipContent side="top">{t("fileExplorer.sendToTerminal")}</TooltipContent>
             </Tooltip>
           </div>
         </div>

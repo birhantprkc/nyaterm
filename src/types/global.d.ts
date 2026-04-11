@@ -1,4 +1,4 @@
-/** Type of terminal session: SSH remote or local shell. */
+/** Type of terminal session. */
 export type SessionType = "SSH" | "Local" | "Telnet" | "Serial";
 
 /** Connection type discriminator matching Rust ConnectionType. */
@@ -10,7 +10,7 @@ export interface SessionInfo {
   name: string;
   session_type: SessionType;
   connected: boolean;
-  /** True when OSC 7 shell integration was injected. False for non-standard shells (JumpServer etc.). */
+  /** True when backend terminal-path tracking is available for this session. */
   injection_active: boolean;
 }
 
