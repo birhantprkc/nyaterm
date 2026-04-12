@@ -1,30 +1,99 @@
-use super::auth::{authenticate_handle, authenticate_handle_with_otp, load_saved_ssh_config};
-use super::client::{build_client_config, connect_with_proxy, SshConfig, SshHandle, SshHandler};
+use super::auth::{authenticate_handle, load_saved_ssh_config};
+use super::client::{
+    build_client_config, connect_via_stream, connect_with_proxy, SshConfig, SshConnectionHandles,
+    SshHandle, SshHandler, SshRawHandle,
+};
 use super::io::{open_shell_channel, ssh_io_loop};
 use crate::core::{
     SessionCommand, SessionHandle, SessionInfo, SessionManager, SessionType, SharedCwd,
 };
-use crate::error::AppResult;
+use crate::error::{AppError, AppResult};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
+
+async fn create_authenticated_connection(
+    app: &AppHandle,
+    config: &SshConfig,
+) -> AppResult<SshHandle> {
+    let ssh_client_config = Arc::new(build_client_config(app));
+
+    if let Some(jump_config) = config.proxy_jump.as_deref() {
+        tracing::info!(
+            jump_host = %jump_config.host,
+            jump_port = jump_config.port,
+            target_host = %config.host,
+            target_port = config.port,
+            "Creating SSH connection via ProxyJump"
+        );
+
+        let jump_handler = SshHandler::new(app.clone(), jump_config.host.clone(), jump_config.port);
+        let mut jump_handle =
+            connect_with_proxy(jump_config, ssh_client_config.clone(), jump_handler).await?;
+        let jump_password_error = format!(
+            "Authentication failed for jump host '{}': invalid credentials",
+            jump_config.name
+        );
+        let jump_key_error = format!(
+            "Authentication failed for jump host '{}': key rejected",
+            jump_config.name
+        );
+        authenticate_handle(
+            &mut jump_handle,
+            jump_config,
+            app,
+            &jump_password_error,
+            &jump_key_error,
+        )
+        .await?;
+
+        let channel = jump_handle
+            .channel_open_direct_tcpip(&config.host, config.port.into(), "127.0.0.1", 0)
+            .await
+            .map_err(|error| {
+                AppError::Channel(format!("Failed to open ProxyJump channel: {}", error))
+            })?;
+
+        let target_handler = SshHandler::new(app.clone(), config.host.clone(), config.port);
+        let mut target_handle =
+            connect_via_stream(channel.into_stream(), ssh_client_config, target_handler).await?;
+        authenticate_handle(
+            &mut target_handle,
+            config,
+            app,
+            "Authentication failed: invalid credentials",
+            "Authentication failed: key rejected",
+        )
+        .await?;
+
+        let target_handle: SshRawHandle = Arc::new(tokio::sync::Mutex::new(target_handle));
+        let jump_handle: SshRawHandle = Arc::new(tokio::sync::Mutex::new(jump_handle));
+        return Ok(Arc::new(SshConnectionHandles::new(
+            target_handle,
+            Some(jump_handle),
+        )));
+    }
+
+    let handler = SshHandler::new(app.clone(), config.host.clone(), config.port);
+    let mut handle = connect_with_proxy(config, ssh_client_config, handler).await?;
+    authenticate_handle(
+        &mut handle,
+        config,
+        app,
+        "Authentication failed: invalid credentials",
+        "Authentication failed: key rejected",
+    )
+    .await?;
+
+    let handle: SshRawHandle = Arc::new(tokio::sync::Mutex::new(handle));
+    Ok(Arc::new(SshConnectionHandles::new(handle, None)))
+}
 
 /// Creates an authenticated SSH handle for a saved connection without opening a PTY/shell.
 /// Used by tunnels to establish their own independent SSH connections.
 pub async fn create_ssh_handle(app: &AppHandle, connection_id: &str) -> AppResult<SshHandle> {
     let ssh_config = load_saved_ssh_config(app, connection_id)?;
-    let handler = SshHandler::new(app.clone(), ssh_config.host.clone(), ssh_config.port);
-    let mut handle =
-        connect_with_proxy(&ssh_config, Arc::new(build_client_config(app)), handler).await?;
-
-    authenticate_handle(
-        &mut handle,
-        &ssh_config,
-        app,
-        "Invalid credentials",
-        "Key authentication rejected",
-    )
-    .await?;
+    let handle = create_authenticated_connection(app, &ssh_config).await?;
 
     tracing::info!(
         host = %ssh_config.host,
@@ -32,7 +101,7 @@ pub async fn create_ssh_handle(app: &AppHandle, connection_id: &str) -> AppResul
         "Tunnel SSH handle created"
     );
 
-    Ok(Arc::new(tokio::sync::Mutex::new(handle)))
+    Ok(handle)
 }
 
 /// Connects via SSH, opens a PTY shell, and spawns the I/O loop.

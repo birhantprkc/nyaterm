@@ -1,9 +1,8 @@
 //! SSH tunnel manager for local, remote, and dynamic (SOCKS5) port forwarding.
 
-use super::{create_ssh_handle, SshHandler};
+use super::{create_ssh_handle, SshHandle, SshRawHandle};
 use crate::config::{self, TunnelConfig};
 use crate::error::{AppError, AppResult};
-use russh::client;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -13,6 +12,7 @@ use tokio::sync::{oneshot, Mutex};
 
 struct TunnelHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
+    _ssh_handle: SshHandle,
 }
 
 pub struct TunnelManager {
@@ -46,6 +46,7 @@ impl TunnelManager {
                 .ok_or_else(|| AppError::Channel("Tunnel has no connection_id".to_string()))?,
         )
         .await?;
+        let target_handle = ssh_handle.target_handle();
 
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
@@ -69,7 +70,7 @@ impl TunnelManager {
                 let target_port = tunnel.target_port;
                 tokio::spawn(Self::run_local_tunnel(
                     listener,
-                    ssh_handle,
+                    target_handle,
                     target_host,
                     target_port,
                     shutdown_rx,
@@ -81,7 +82,7 @@ impl TunnelManager {
                 let listen_port = tunnel.listen_port;
                 let listen_addr = bind_addr.to_string();
                 tokio::spawn(Self::run_remote_tunnel(
-                    ssh_handle,
+                    target_handle,
                     listen_addr,
                     listen_port,
                     target_host,
@@ -98,7 +99,11 @@ impl TunnelManager {
                             tunnel.listen_port, e
                         ))
                     })?;
-                tokio::spawn(Self::run_dynamic_tunnel(listener, ssh_handle, shutdown_rx));
+                tokio::spawn(Self::run_dynamic_tunnel(
+                    listener,
+                    target_handle,
+                    shutdown_rx,
+                ));
             }
             other => {
                 return Err(AppError::Channel(format!("Unknown tunnel type: {}", other)));
@@ -109,6 +114,7 @@ impl TunnelManager {
             tunnel.id.clone(),
             TunnelHandle {
                 shutdown_tx: Some(shutdown_tx),
+                _ssh_handle: ssh_handle,
             },
         );
 
@@ -128,7 +134,7 @@ impl TunnelManager {
 
     async fn run_local_tunnel(
         listener: TcpListener,
-        ssh_handle: Arc<tokio::sync::Mutex<client::Handle<SshHandler>>>,
+        ssh_handle: SshRawHandle,
         target_host: String,
         target_port: u16,
         mut shutdown_rx: oneshot::Receiver<()>,
@@ -171,7 +177,7 @@ impl TunnelManager {
     }
 
     async fn run_remote_tunnel(
-        ssh_handle: Arc<tokio::sync::Mutex<client::Handle<SshHandler>>>,
+        ssh_handle: SshRawHandle,
         listen_addr: String,
         listen_port: u16,
         _target_host: String,
@@ -200,7 +206,7 @@ impl TunnelManager {
 
     async fn run_dynamic_tunnel(
         listener: TcpListener,
-        ssh_handle: Arc<tokio::sync::Mutex<client::Handle<SshHandler>>>,
+        ssh_handle: SshRawHandle,
         mut shutdown_rx: oneshot::Receiver<()>,
     ) {
         loop {
@@ -223,7 +229,7 @@ impl TunnelManager {
 
     async fn handle_socks5_connection(
         mut stream: tokio::net::TcpStream,
-        ssh_handle: Arc<tokio::sync::Mutex<client::Handle<SshHandler>>>,
+        ssh_handle: SshRawHandle,
         peer_addr: std::net::SocketAddr,
     ) {
         let mut buf = [0u8; 2];

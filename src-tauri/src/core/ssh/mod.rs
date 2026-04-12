@@ -13,6 +13,6 @@ mod tunnel;
 
 pub(crate) use auth::load_saved_ssh_config;
 pub use auth::PendingAuthManager;
-pub use client::SshHandler;
+pub(crate) use client::{SshConnectionHandles, SshHandle, SshRawHandle};
 pub use session::{create_ssh_handle, create_ssh_session};
 pub(crate) use tunnel::TunnelManager;

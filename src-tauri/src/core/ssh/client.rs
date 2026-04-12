@@ -9,6 +9,8 @@ use tokio::sync::Mutex;
 /// Connection parameters for SSH (host, port, user, auth method).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SshConfig {
+    #[serde(default)]
+    pub connection_id: Option<String>,
     pub name: String,
     pub host: String,
     pub port: u16,
@@ -31,7 +33,29 @@ pub enum SshAuth {
     },
 }
 
-pub(crate) type SshHandle = Arc<Mutex<client::Handle<SshHandler>>>;
+pub(crate) type SshRawHandle = Arc<Mutex<client::Handle<SshHandler>>>;
+
+pub struct SshConnectionHandles {
+    target: SshRawHandle,
+    jump: Option<SshRawHandle>,
+}
+
+impl SshConnectionHandles {
+    pub fn new(target: SshRawHandle, jump: Option<SshRawHandle>) -> Self {
+        Self { target, jump }
+    }
+
+    pub fn target_handle(&self) -> SshRawHandle {
+        self.target.clone()
+    }
+
+    #[allow(dead_code)]
+    pub fn jump_handle(&self) -> Option<SshRawHandle> {
+        self.jump.clone()
+    }
+}
+
+pub(crate) type SshHandle = Arc<SshConnectionHandles>;
 
 /// russh client handler; performs TOFU known_hosts verification.
 pub struct SshHandler {

@@ -1,8 +1,7 @@
-use crate::core::ssh::SshHandler;
+use crate::core::ssh::SshConnectionHandles;
 use crate::core::stats::{parse_stats_output, RemoteStats, SYSINFO_SCRIPT};
 use crate::core::SessionManager;
 use crate::error::{AppError, AppResult};
-use russh::client;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,7 +12,7 @@ pub async fn get_remote_stats(
 ) -> AppResult<RemoteStats> {
     use russh::ChannelMsg;
 
-    let handle_mtx = {
+    let ssh_handle = {
         let sessions = state.sessions.lock().await;
         let session = sessions.get(&session_id).ok_or_else(|| {
             AppError::SessionNotFound(format!("Session '{}' not found", session_id))
@@ -24,9 +23,10 @@ pub async fn get_remote_stats(
             .as_ref()
             .ok_or_else(|| AppError::Config("Not an SSH session".to_string()))?
             .clone()
-            .downcast::<tokio::sync::Mutex<client::Handle<SshHandler>>>()
+            .downcast::<SshConnectionHandles>()
             .map_err(|_| AppError::Config("Failed to get SSH handle".to_string()))?
     };
+    let handle_mtx = ssh_handle.target_handle();
 
     let output = tokio::time::timeout(Duration::from_secs(15), async {
         let mut channel = {

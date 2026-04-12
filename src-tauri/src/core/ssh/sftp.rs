@@ -3,10 +3,9 @@
 //! Reuses the existing SSH connection via channel multiplexing instead of
 //! creating a new TCP connection for each operation.
 
-use super::SshHandler;
+use super::SshConnectionHandles;
 use crate::core::SessionManager;
 use crate::error::{AppError, AppResult};
-use russh::client;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::{FileType, OpenFlags};
 use serde::Serialize;
@@ -58,7 +57,7 @@ pub struct FileProperties {
 
 /// Opens an SFTP session by reusing the existing SSH connection's handle.
 async fn open_sftp(manager: &SessionManager, session_id: &str) -> AppResult<SftpSession> {
-    let handle_mtx = {
+    let ssh_handle = {
         let sessions = manager.sessions.lock().await;
         let session = sessions.get(session_id).ok_or_else(|| {
             AppError::SessionNotFound(format!("Session '{}' not found", session_id))
@@ -69,9 +68,10 @@ async fn open_sftp(manager: &SessionManager, session_id: &str) -> AppResult<Sftp
             .as_ref()
             .ok_or_else(|| AppError::Config("Not an SSH session".to_string()))?
             .clone()
-            .downcast::<tokio::sync::Mutex<client::Handle<SshHandler>>>()
+            .downcast::<SshConnectionHandles>()
             .map_err(|_| AppError::Config("Failed to get SSH handle".to_string()))?
     };
+    let handle_mtx = ssh_handle.target_handle();
 
     let channel = {
         let handle = handle_mtx.lock().await;
