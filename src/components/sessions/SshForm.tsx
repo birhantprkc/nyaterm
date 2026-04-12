@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdChevronRight, MdExpandMore, MdSettings } from "react-icons/md";
+import { ConnectionCombobox, type ConnectionOption } from "@/components/dialog/network/shared";
 import { KeyManagementTab } from "@/components/panel/security-auth/KeyManagementTab";
 import { PasswordManagementTab } from "@/components/panel/security-auth/PasswordManagementTab";
 import { Button } from "@/components/ui/button";
@@ -38,6 +39,9 @@ interface SshFormProps {
   proxyId: string;
   setProxyId: (v: string) => void;
   proxies: ProxyConfig[];
+  jumpHostId: string;
+  setJumpHostId: (v: string) => void;
+  jumpHostOptions: ConnectionOption[];
   otpId: string;
   setOtpId: (v: string) => void;
   autoFillOtp: boolean;
@@ -61,6 +65,9 @@ export function SshForm({
   proxyId,
   setProxyId,
   proxies,
+  jumpHostId,
+  setJumpHostId,
+  jumpHostOptions,
   otpId,
   setOtpId,
   autoFillOtp,
@@ -137,9 +144,13 @@ export function SshForm({
   const selectedKeyName = sshKeys.find((k) => k.id === keyId)?.name;
   const selectedPasswordName = savedPasswords.find((p) => p.id === passwordId)?.name;
   const selectedProxyName = proxies.find((proxy) => proxy.id === proxyId)?.name;
+  const selectedJumpHost = jumpHostOptions.find((option) => option.connection.id === jumpHostId);
   const selectedOtpLabel = otpEntries.find((entry) => entry.id === otpId);
   const advancedSummary = [
     proxyId ? (selectedProxyName ?? t("dialog.proxySelect")) : t("dialog.noProxy"),
+    jumpHostId
+      ? (selectedJumpHost?.connection.name ?? t("dialog.selectProxyJump"))
+      : t("dialog.noProxyJump"),
     otpId
       ? selectedOtpLabel
         ? `${selectedOtpLabel.issuer} (${selectedOtpLabel.username})`
@@ -331,7 +342,7 @@ export function SshForm({
           </span>
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-3 space-y-3">
-          <div className="grid gap-3 lg:grid-cols-2">
+          <div className="grid gap-3 xl:grid-cols-3">
             <div className="rounded-lg border bg-accent/25 p-3">
               <div className="space-y-0.5">
                 <div className="text-xs font-medium">{t("dialog.proxySelect")}</div>
@@ -361,6 +372,36 @@ export function SshForm({
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-accent/25 p-3">
+              <div className="space-y-0.5">
+                <div className="text-xs font-medium">{t("dialog.proxyJump")}</div>
+                <p className="text-[0.6875rem] leading-relaxed text-muted-foreground">
+                  {jumpHostId
+                    ? (selectedJumpHost?.subtitle ??
+                      selectedJumpHost?.connection.name ??
+                      t("dialog.selectProxyJump"))
+                    : t("dialog.noProxyJump")}
+                </p>
+              </div>
+              <div className="mt-3">
+                <Label className="text-[0.6875rem] text-muted-foreground">
+                  {t("dialog.selectProxyJump")}
+                </Label>
+                <div className="mt-1">
+                  <ConnectionCombobox
+                    value={jumpHostId}
+                    options={jumpHostOptions}
+                    placeholder={t("dialog.noProxyJump")}
+                    searchPlaceholder={t("network.searchConnections")}
+                    emptyText={t("dialog.proxyJumpSshOnly")}
+                    missingSelectionLabel={t("network.connectionMissing")}
+                    clearLabel={t("dialog.noProxyJump")}
+                    onChange={setJumpHostId}
+                  />
+                </div>
               </div>
             </div>
 

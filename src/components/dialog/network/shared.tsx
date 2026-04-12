@@ -22,7 +22,8 @@ export interface ConnectionOption {
   groupPath: string;
   subtitle: string;
   searchText: string;
-  hasProxy: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
 }
 
 export interface ConnectionOptionGroup {
@@ -139,7 +140,7 @@ export function ConnectionCombobox({
   searchPlaceholder,
   emptyText,
   missingSelectionLabel,
-  disabledReason,
+  clearLabel,
   onChange,
 }: {
   value: string;
@@ -148,7 +149,7 @@ export function ConnectionCombobox({
   searchPlaceholder: string;
   emptyText: string;
   missingSelectionLabel: string;
-  disabledReason?: string;
+  clearLabel?: string;
   onChange: (id: string) => void;
 }) {
   const { t } = useTranslation();
@@ -223,6 +224,23 @@ export function ConnectionCombobox({
           >
             <CommandList className="max-h-none">
               <CommandEmpty>{emptyText}</CommandEmpty>
+              {clearLabel ? (
+                <CommandGroup className="p-0">
+                  <CommandItem
+                    value={clearLabel}
+                    className="items-start gap-3 px-3 py-2"
+                    onSelect={() => {
+                      onChange("");
+                      setOpen(false);
+                    }}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm">{clearLabel}</div>
+                    </div>
+                    {!value ? <MdCheck className="mt-0.5 text-sm text-primary" /> : null}
+                  </CommandItem>
+                </CommandGroup>
+              ) : null}
               {groupedOptions.map((group) => (
                 <CommandGroup
                   key={group.id}
@@ -241,11 +259,9 @@ export function ConnectionCombobox({
                       key={option.connection.id}
                       value={`${option.connection.name} ${option.searchText}`}
                       className="items-start gap-3 px-3 py-2"
-                      disabled={
-                        !!disabledReason && option.hasProxy && option.connection.id !== value
-                      }
+                      disabled={!!option.disabled && option.connection.id !== value}
                       onSelect={() => {
-                        if (disabledReason && option.hasProxy && option.connection.id !== value) {
+                        if (option.disabled && option.connection.id !== value) {
                           return;
                         }
                         onChange(option.connection.id);
@@ -258,9 +274,9 @@ export function ConnectionCombobox({
                           {option.subtitle}
                         </div>
                       </div>
-                      {option.hasProxy && option.connection.id !== value ? (
+                      {option.disabled && option.connection.id !== value ? (
                         <span className="pt-0.5 text-[0.625rem] text-muted-foreground">
-                          {disabledReason ?? t("network.alreadyConfigured")}
+                          {option.disabledReason ?? t("network.alreadyConfigured")}
                         </span>
                       ) : null}
                       {option.connection.id === value ? (

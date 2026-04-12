@@ -3,14 +3,14 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdAdd, MdDelete, MdEdit, MdLan, MdRouter } from "react-icons/md";
 import { toast } from "sonner";
+import { ProxyDialog } from "@/components/dialog/network/ProxyDialog";
 import {
+  buildGroupPath,
   type ConnectionOption,
   EmptyState,
   StatusBadge,
-  buildGroupPath,
   sortLabel,
 } from "@/components/dialog/network/shared";
-import { ProxyDialog } from "@/components/dialog/network/ProxyDialog";
 import { TunnelDialog } from "@/components/dialog/network/TunnelDialog";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
@@ -191,7 +191,7 @@ export default function NetworkPanel() {
           searchText: [connection.name, connection.host, connection.username, groupPath]
             .filter(Boolean)
             .join(" "),
-          hasProxy: false,
+          disabled: false,
         };
       })
       .sort((left, right) => {

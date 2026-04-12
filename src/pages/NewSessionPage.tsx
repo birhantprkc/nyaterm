@@ -1,10 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FaServer } from "react-icons/fa6";
 import { MdAdd, MdExpandMore } from "react-icons/md";
+import {
+  buildGroupPath,
+  type ConnectionOption,
+  sortLabel,
+} from "@/components/dialog/network/shared";
 import { SYSTEM_ICONS } from "@/components/icons";
 import ChildWindowHeader from "@/components/layout/ChildWindowHeader";
 import { LocalTerminal } from "@/components/sessions/LocalTerminal";
@@ -44,6 +49,7 @@ export default function NewSessionPage() {
   const [error, setError] = useState("");
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
+  const [savedConnections, setSavedConnections] = useState<SavedConnection[]>([]);
   const [showGroupDropdown, setShowGroupDropdown] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupParentId, setNewGroupParentId] = useState("");
@@ -51,6 +57,7 @@ export default function NewSessionPage() {
 
   // Proxy
   const [proxyId, setProxyId] = useState("");
+  const [jumpHostId, setJumpHostId] = useState("");
   const [proxies, setProxies] = useState<ProxyConfig[]>([]);
 
   // OTP / 2FA
@@ -99,53 +106,58 @@ export default function NewSessionPage() {
     invoke<OtpEntry[]>("get_otp_entries")
       .then(setOtpEntries)
       .catch(() => {});
+    invoke<SavedConnection[]>("get_saved_connections")
+      .then((conns) => {
+        setSavedConnections(conns);
+        if (!editId) {
+          return;
+        }
 
-    if (editId) {
-      invoke<SavedConnection[]>("get_saved_connections")
-        .then((conns) => {
-          const found = conns.find((c) => c.id === editId);
-          if (found) {
-            setInitialData(found);
-            setName(found.name);
-            setGroupId(found.group_id || "");
-            setDescription(found.description || "");
-            setIconKey(found.icon || "");
+        const found = conns.find((connection) => connection.id === editId);
+        if (!found) {
+          return;
+        }
 
-            const tabMap: Record<string, string> = {
-              ssh: "ssh",
-              local_terminal: "local",
-              telnet: "telnet",
-              serial: "serial",
-            };
-            setCurrentTab(tabMap[found.type] || "ssh");
+        setInitialData(found);
+        setName(found.name);
+        setGroupId(found.group_id || "");
+        setDescription(found.description || "");
+        setIconKey(found.icon || "");
 
-            if (found.type === "ssh") {
-              setHost(found.host || "");
-              setSshPort(found.port || 22);
-              setUsername(found.username || "root");
-              setAuthType((found.auth?.mode as "password" | "key") || "password");
-              setPasswordId(found.auth?.password_id || "");
-              setKeyId(found.auth?.key_id || "");
-              setProxyId(found.network?.proxy_id || "");
-              setOtpId(found.auth?.otp_id || "");
-              setAutoFillOtp(found.auth?.auto_fill_otp || false);
-            } else if (found.type === "telnet") {
-              setHost(found.host || "");
-              setTelnetPort(found.port || 23);
-            } else if (found.type === "local_terminal") {
-              setShellPath(found.shell_path || "powershell.exe");
-              setWorkingDir(found.working_dir || "");
-            } else if (found.type === "serial") {
-              setSerialPortName(found.port_name || "");
-              setBaudRate(String(found.baud_rate || 115200));
-              setDataBits(String(found.data_bits || 8));
-              setParity(found.parity || "none");
-              setStopBits(found.stop_bits || "1");
-            }
-          }
-        })
-        .catch(() => {});
-    }
+        const tabMap: Record<string, string> = {
+          ssh: "ssh",
+          local_terminal: "local",
+          telnet: "telnet",
+          serial: "serial",
+        };
+        setCurrentTab(tabMap[found.type] || "ssh");
+
+        if (found.type === "ssh") {
+          setHost(found.host || "");
+          setSshPort(found.port || 22);
+          setUsername(found.username || "root");
+          setAuthType((found.auth?.mode as "password" | "key") || "password");
+          setPasswordId(found.auth?.password_id || "");
+          setKeyId(found.auth?.key_id || "");
+          setProxyId(found.network?.proxy_id || "");
+          setJumpHostId(found.network?.proxy_jump_id || "");
+          setOtpId(found.auth?.otp_id || "");
+          setAutoFillOtp(found.auth?.auto_fill_otp || false);
+        } else if (found.type === "telnet") {
+          setHost(found.host || "");
+          setTelnetPort(found.port || 23);
+        } else if (found.type === "local_terminal") {
+          setShellPath(found.shell_path || "powershell.exe");
+          setWorkingDir(found.working_dir || "");
+        } else if (found.type === "serial") {
+          setSerialPortName(found.port_name || "");
+          setBaudRate(String(found.baud_rate || 115200));
+          setDataBits(String(found.data_bits || 8));
+          setParity(found.parity || "none");
+          setStopBits(found.stop_bits || "1");
+        }
+      })
+      .catch(() => {});
   }, [editId]);
 
   const loadSerialPorts = useCallback(async () => {
@@ -184,6 +196,7 @@ export default function NewSessionPage() {
     setKeyId("");
     setIconKey("");
     setProxyId("");
+    setJumpHostId("");
     setOtpId("");
     setAutoFillOtp(false);
     setSerialPortName("");
@@ -202,17 +215,49 @@ export default function NewSessionPage() {
     setSaveSuccess(false);
   }, []);
 
-  const serialPortOptions: { unavailable?: boolean; value: string }[] = serialPorts.map(
-    (port) => ({
-      value: port,
-    }),
-  );
+  const serialPortOptions: { unavailable?: boolean; value: string }[] = serialPorts.map((port) => ({
+    value: port,
+  }));
   if (serialPortName && !serialPorts.includes(serialPortName)) {
     serialPortOptions.unshift({
       value: serialPortName,
       unavailable: true,
     });
   }
+
+  const groupsById = useMemo(() => new Map(groups.map((group) => [group.id, group])), [groups]);
+
+  const jumpHostOptions = useMemo<ConnectionOption[]>(() => {
+    return savedConnections
+      .filter((connection) => connection.type === "ssh" && connection.id !== editId)
+      .map((connection) => {
+        const groupPath = buildGroupPath(connection.group_id, groupsById);
+        const subtitle = [
+          groupPath,
+          connection.host && `${connection.host}:${connection.port ?? 22}`,
+          connection.username,
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        return {
+          connection,
+          groupPath,
+          subtitle,
+          searchText: [connection.name, connection.host, connection.username, groupPath]
+            .filter(Boolean)
+            .join(" "),
+          disabled: !!connection.network?.proxy_jump_id,
+          disabledReason: connection.network?.proxy_jump_id
+            ? t("dialog.proxyJumpAlreadyConfigured")
+            : undefined,
+        };
+      })
+      .sort((left, right) => {
+        const pathSort = sortLabel(left.groupPath, right.groupPath);
+        return pathSort !== 0 ? pathSort : sortLabel(left.connection.name, right.connection.name);
+      });
+  }, [editId, groupsById, savedConnections, t]);
 
   const handleClose = () => {
     if (connecting) return;
@@ -263,6 +308,19 @@ export default function NewSessionPage() {
             : currentTab === "telnet"
               ? "telnet"
               : "serial";
+      const network =
+        currentTab === "ssh"
+          ? (() => {
+              const nextNetwork: NonNullable<SavedConnection["network"]> = {};
+              if (proxyId) {
+                nextNetwork.proxy_id = proxyId;
+              }
+              if (jumpHostId) {
+                nextNetwork.proxy_jump_id = jumpHostId;
+              }
+              return Object.keys(nextNetwork).length > 0 ? nextNetwork : undefined;
+            })()
+          : undefined;
 
       const connection: SavedConnection = {
         id: initialData?.id || "",
@@ -283,7 +341,7 @@ export default function NewSessionPage() {
                 otp_id: otpId || undefined,
                 auto_fill_otp: otpId ? autoFillOtp : undefined,
               },
-              network: proxyId ? { proxy_id: proxyId } : initialData?.network,
+              network,
             }
           : {}),
         ...(currentTab === "telnet" ? { host, port: telnetPort } : {}),
@@ -556,6 +614,9 @@ export default function NewSessionPage() {
               proxyId={proxyId}
               setProxyId={setProxyId}
               proxies={proxies}
+              jumpHostId={jumpHostId}
+              setJumpHostId={setJumpHostId}
+              jumpHostOptions={jumpHostOptions}
               otpId={otpId}
               setOtpId={setOtpId}
               autoFillOtp={autoFillOtp}
@@ -574,12 +635,7 @@ export default function NewSessionPage() {
           </TabsContent>
 
           <TabsContent value="telnet" className="space-y-4 m-0 border-0 outline-none w-full">
-            <TelnetForm
-              host={host}
-              setHost={setHost}
-              port={telnetPort}
-              setPort={setTelnetPort}
-            />
+            <TelnetForm host={host} setHost={setHost} port={telnetPort} setPort={setTelnetPort} />
           </TabsContent>
 
           <TabsContent value="serial" className="space-y-4 m-0 border-0 outline-none w-full">
@@ -634,12 +690,7 @@ export default function NewSessionPage() {
 
       {/* Footer */}
       <div className="flex shrink-0 flex-row gap-2 border-t px-5 py-3 justify-end items-center">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-xs px-4"
-          onClick={handleClose}
-        >
+        <Button variant="ghost" size="sm" className="text-xs px-4" onClick={handleClose}>
           {t("dialog.cancel")}
         </Button>
         <Button
