@@ -26,6 +26,7 @@ import {
 import { toast } from "sonner";
 import DeleteDialog, {
   type DeleteDialogData,
+  type DeleteDialogItem,
 } from "@/components/dialog/file-explorer/DeleteDialog";
 import MoveDialog, { type MoveDialogData } from "@/components/dialog/file-explorer/MoveDialog";
 import NewItemDialog, {
@@ -441,9 +442,7 @@ export default function FileExplorer({ activeSessionId, activeSessionType }: Fil
   const handleDeleteSelected = () => {
     if (selectedFiles.size === 0) return;
     const selected = files.filter((f) => selectedFiles.has(f.name));
-    for (const entry of selected) {
-      handleDelete(entry);
-    }
+    openDeleteDialog(selected);
   };
 
   const handleGoUp = () => {
@@ -505,13 +504,30 @@ export default function FileExplorer({ activeSessionId, activeSessionType }: Fil
     emit(`focus-terminal-${activeSessionId}`).catch(() => {});
   };
 
-  const handleDelete = (entry: FileEntry) => {
-    if (!activeSessionId) return;
-    setDeleteDialogData({
-      sessionId: activeSessionId,
+  const buildDeleteItems = (entries: FileEntry[]): DeleteDialogItem[] => {
+    return entries.map((entry) => ({
       path: getEntryFullPath(entry),
       name: entry.name,
+    }));
+  };
+
+  const getContextMenuEntries = (entry: FileEntry) => {
+    if (selectedFiles.size > 1 && selectedFiles.has(entry.name)) {
+      return files.filter((file) => selectedFiles.has(file.name));
+    }
+    return [entry];
+  };
+
+  const openDeleteDialog = (entries: FileEntry[]) => {
+    if (!activeSessionId || entries.length === 0) return;
+    setDeleteDialogData({
+      sessionId: activeSessionId,
+      items: buildDeleteItems(entries),
     });
+  };
+
+  const handleDeleteFromContextMenu = (entry: FileEntry) => {
+    openDeleteDialog(getContextMenuEntries(entry));
   };
 
   const resolveDownloadDir = async (): Promise<string> => {
@@ -585,7 +601,7 @@ export default function FileExplorer({ activeSessionId, activeSessionType }: Fil
 
   const handleDownloadFromContextMenu = async (entry: FileEntry) => {
     if (selectedFiles.size > 1 && selectedFiles.has(entry.name)) {
-      const selected = files.filter((f) => selectedFiles.has(f.name));
+      const selected = getContextMenuEntries(entry);
       await downloadEntries(selected);
       return;
     }
@@ -888,7 +904,7 @@ export default function FileExplorer({ activeSessionId, activeSessionType }: Fil
                           name: entry.name,
                         });
                     }}
-                    onDelete={handleDelete}
+                    onDelete={handleDeleteFromContextMenu}
                     onCopyPath={handleCopyPath}
                     onSendToTerminal={handleSendToTerminal}
                     onProperties={(entry) => {
@@ -1067,7 +1083,11 @@ export default function FileExplorer({ activeSessionId, activeSessionType }: Fil
         <DeleteDialog
           data={deleteDialogData}
           onClose={() => setDeleteDialogData(null)}
-          onSuccess={() => loadDirectory(currentPath)}
+          onSuccess={() => {
+            setSelectedFiles(new Set());
+            lastSelectedRef.current = null;
+            loadDirectory(currentPath);
+          }}
         />
       )}
 
