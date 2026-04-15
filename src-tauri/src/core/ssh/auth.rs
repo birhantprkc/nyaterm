@@ -104,8 +104,9 @@ fn resolve_auth(app: &AppHandle, conn: &crate::config::SavedConnection) -> AppRe
     match conn_auth.mode.as_str() {
         "password" => {
             if let Some(ref ciphertext) = conn_auth.password {
-                let password = crate::utils::crypto::decrypt(ciphertext)
-                    .map_err(|e| AppError::Auth(format!("Failed to decrypt inline password: {e}")))?;
+                let password = crate::utils::crypto::decrypt(ciphertext).map_err(|e| {
+                    AppError::Auth(format!("Failed to decrypt inline password: {e}"))
+                })?;
                 return Ok(SshAuth::Password { password });
             }
 
@@ -215,6 +216,14 @@ pub(super) async fn authenticate_handle(
 
     match &config.auth {
         SshAuth::Password { password } => {
+            tracing::info!(
+                host = %config.host,
+                port = config.port,
+                user = %config.username,
+                auth_mode = "password",
+                "Starting SSH authentication"
+            );
+
             let authenticated = handle
                 .authenticate_password(&config.username, password)
                 .await
@@ -227,6 +236,7 @@ pub(super) async fn authenticate_handle(
                 &config.name,
                 app,
                 password_error,
+                Some(KeyboardInteractiveMode::PasswordFallback { password }),
                 otp_info.as_ref(),
             )
             .await?;
@@ -242,6 +252,17 @@ pub(super) async fn authenticate_handle(
                 .ok()
                 .flatten()
                 .flatten();
+
+            tracing::info!(
+                host = %config.host,
+                port = config.port,
+                user = %config.username,
+                auth_mode = "publickey",
+                key_algorithm = %key.algorithm(),
+                rsa_hash = ?hash_alg,
+                "Starting SSH authentication"
+            );
+
             let authenticated = handle
                 .authenticate_publickey(
                     &config.username,
@@ -257,11 +278,19 @@ pub(super) async fn authenticate_handle(
                 &config.name,
                 app,
                 key_error,
+                None,
                 otp_info.as_ref(),
             )
             .await?;
         }
     }
+
+    tracing::info!(
+        host = %config.host,
+        port = config.port,
+        user = %config.username,
+        "SSH authentication succeeded"
+    );
 
     Ok(())
 }
@@ -269,6 +298,28 @@ pub(super) async fn authenticate_handle(
 struct OtpAutoFillInfo {
     otp_id: String,
     auto_fill: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum KeyboardInteractiveMode<'a> {
+    AdditionalFactor,
+    PasswordFallback { password: &'a str },
+}
+
+impl<'a> KeyboardInteractiveMode<'a> {
+    fn label(self) -> &'static str {
+        match self {
+            Self::AdditionalFactor => "additional-factor",
+            Self::PasswordFallback { .. } => "password-fallback",
+        }
+    }
+
+    fn password(self) -> Option<&'a str> {
+        match self {
+            Self::AdditionalFactor => None,
+            Self::PasswordFallback { password } => Some(password),
+        }
+    }
 }
 
 fn resolve_otp_info(app: &AppHandle, connection_id: &str) -> Option<OtpAutoFillInfo> {
@@ -292,12 +343,20 @@ async fn finish_keyboard_interactive(
     username: &str,
     connection_name: &str,
     app: &AppHandle,
+    mode: KeyboardInteractiveMode<'_>,
     otp_info: Option<&OtpAutoFillInfo>,
 ) -> AppResult<()> {
     let pending_mgr = app
         .try_state::<Arc<PendingAuthManager>>()
         .ok_or_else(|| AppError::Auth("PendingAuthManager not available".to_string()))?;
     let pending_mgr = pending_mgr.inner().clone();
+
+    tracing::info!(
+        connection_name,
+        username,
+        mode = mode.label(),
+        "Starting keyboard-interactive authentication"
+    );
 
     let mut step = handle
         .authenticate_keyboard_interactive_start(username, None)
@@ -306,8 +365,27 @@ async fn finish_keyboard_interactive(
 
     loop {
         match step {
-            KeyboardInteractiveAuthResponse::Success => return Ok(()),
-            KeyboardInteractiveAuthResponse::Failure { .. } => {
+            KeyboardInteractiveAuthResponse::Success => {
+                tracing::info!(
+                    connection_name,
+                    username,
+                    mode = mode.label(),
+                    "Keyboard-interactive authentication succeeded"
+                );
+                return Ok(());
+            }
+            KeyboardInteractiveAuthResponse::Failure {
+                remaining_methods,
+                partial_success,
+            } => {
+                tracing::warn!(
+                    connection_name,
+                    username,
+                    mode = mode.label(),
+                    ?remaining_methods,
+                    partial_success,
+                    "Keyboard-interactive authentication failed"
+                );
                 return Err(AppError::Auth(
                     "Keyboard-interactive authentication failed".to_string(),
                 ));
@@ -317,10 +395,35 @@ async fn finish_keyboard_interactive(
                 instructions: _,
                 prompts,
             } => {
+                let hidden_prompts = prompts.iter().filter(|prompt| !prompt.echo).count();
+                tracing::debug!(
+                    connection_name,
+                    username,
+                    mode = mode.label(),
+                    prompt_count = prompts.len(),
+                    hidden_prompts,
+                    "Received keyboard-interactive prompts"
+                );
+
                 let responses = if prompts.is_empty() {
                     Vec::new()
+                } else if let Some(password) = mode
+                    .password()
+                    .filter(|_| should_auto_fill_password_prompts(&prompts))
+                {
+                    tracing::info!(
+                        connection_name,
+                        username,
+                        "Auto-filling password for keyboard-interactive auth"
+                    );
+                    vec![password.to_string()]
                 } else if let Some(info) = otp_info.filter(|i| i.auto_fill) {
-                    tracing::info!("Auto-filling OTP for keyboard-interactive auth");
+                    tracing::info!(
+                        connection_name,
+                        username,
+                        otp_entry_id = %info.otp_id,
+                        "Auto-filling OTP for keyboard-interactive auth"
+                    );
                     let result = crate::cmd::otp::generate_otp_for_entry(app, &info.otp_id)?;
                     prompts.iter().map(|_| result.code.clone()).collect()
                 } else {
@@ -339,6 +442,13 @@ async fn finish_keyboard_interactive(
                             .collect(),
                         otp_entry_id: otp_info.map(|i| i.otp_id.clone()),
                     };
+                    tracing::info!(
+                        connection_name,
+                        username,
+                        prompt_count = payload.prompts.len(),
+                        otp_entry_id = payload.otp_entry_id.as_deref(),
+                        "Forwarding keyboard-interactive prompts to frontend"
+                    );
                     let _ = app.emit("otp-request", &payload);
 
                     match rx.await {
@@ -376,6 +486,7 @@ async fn try_keyboard_interactive_after_partial(
     connection_name: &str,
     app: &AppHandle,
     fallback_error: &str,
+    password_fallback: Option<KeyboardInteractiveMode<'_>>,
     otp_info: Option<&OtpAutoFillInfo>,
 ) -> AppResult<()> {
     match auth_result {
@@ -384,14 +495,102 @@ async fn try_keyboard_interactive_after_partial(
             remaining_methods,
             partial_success,
         } => {
-            if *partial_success && remaining_methods.contains(&MethodKind::KeyboardInteractive) {
+            let keyboard_interactive_available =
+                remaining_methods.contains(&MethodKind::KeyboardInteractive);
+            let can_retry_with_password_fallback =
+                keyboard_interactive_available && password_fallback.is_some();
+
+            if *partial_success && keyboard_interactive_available {
                 tracing::info!(
+                    connection_name,
+                    username,
+                    ?remaining_methods,
                     "Primary auth partial success, continuing with keyboard-interactive"
                 );
-                finish_keyboard_interactive(handle, username, connection_name, app, otp_info).await
+                finish_keyboard_interactive(
+                    handle,
+                    username,
+                    connection_name,
+                    app,
+                    KeyboardInteractiveMode::AdditionalFactor,
+                    otp_info,
+                )
+                .await
+            } else if can_retry_with_password_fallback {
+                tracing::info!(
+                    connection_name,
+                    username,
+                    ?remaining_methods,
+                    "Password auth rejected, retrying with keyboard-interactive"
+                );
+                let Some(mode) = password_fallback else {
+                    return Err(AppError::Auth(fallback_error.to_string()));
+                };
+                finish_keyboard_interactive(handle, username, connection_name, app, mode, otp_info)
+                    .await
             } else {
+                tracing::warn!(
+                    connection_name,
+                    username,
+                    ?remaining_methods,
+                    partial_success = *partial_success,
+                    "SSH authentication failed without usable keyboard-interactive fallback"
+                );
                 Err(AppError::Auth(fallback_error.to_string()))
             }
         }
+    }
+}
+
+fn should_auto_fill_password_prompts(prompts: &[client::Prompt]) -> bool {
+    prompts.len() == 1 && !prompts[0].echo
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_auto_fill_password_prompts, KeyboardInteractiveMode};
+    use russh::client::Prompt;
+
+    #[test]
+    fn auto_fills_single_hidden_keyboard_interactive_prompt() {
+        let prompts = vec![Prompt {
+            prompt: "Password: ".to_string(),
+            echo: false,
+        }];
+
+        assert!(should_auto_fill_password_prompts(&prompts));
+    }
+
+    #[test]
+    fn does_not_auto_fill_multiple_keyboard_interactive_prompts() {
+        let prompts = vec![
+            Prompt {
+                prompt: "Password: ".to_string(),
+                echo: false,
+            },
+            Prompt {
+                prompt: "Verification code: ".to_string(),
+                echo: false,
+            },
+        ];
+
+        assert!(!should_auto_fill_password_prompts(&prompts));
+    }
+
+    #[test]
+    fn does_not_auto_fill_echoed_prompt() {
+        let prompts = vec![Prompt {
+            prompt: "Username: ".to_string(),
+            echo: true,
+        }];
+
+        assert!(!should_auto_fill_password_prompts(&prompts));
+    }
+
+    #[test]
+    fn additional_factor_mode_never_exposes_password_fallback() {
+        assert!(KeyboardInteractiveMode::AdditionalFactor
+            .password()
+            .is_none());
     }
 }
