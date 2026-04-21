@@ -11,7 +11,7 @@ mod utils;
 use std::sync::Arc;
 
 use crate::core::ssh::{PendingAuthManager, TunnelManager};
-use crate::core::{QuickCommandsStore, RecordingManager, SessionManager};
+use crate::core::{CloudSyncManager, QuickCommandsStore, RecordingManager, SessionManager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -20,6 +20,7 @@ pub fn run() {
     let recording_manager = Arc::new(RecordingManager::new());
     let pending_auth_manager = Arc::new(PendingAuthManager::new());
     let quick_commands_store = Arc::new(QuickCommandsStore::new());
+    let cloud_sync_manager = Arc::new(CloudSyncManager::new());
 
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -31,13 +32,23 @@ pub fn run() {
         .manage(recording_manager.clone())
         .manage(pending_auth_manager.clone())
         .manage(quick_commands_store.clone())
-        .setup(move |a| app::setup(a, session_manager, quick_commands_store))
+        .manage(cloud_sync_manager.clone())
+        .setup(move |a| app::setup(a, session_manager, quick_commands_store, cloud_sync_manager))
         .on_window_event(app::on_window_event)
         .invoke_handler(tauri::generate_handler![
             cmd::clipboard::read_clipboard_text,
             cmd::log::append_frontend_logs,
             cmd::log::export_diagnostics,
             cmd::settings::get_system_fonts,
+            cmd::cloud_sync::test_cloud_sync_connection,
+            cmd::cloud_sync::get_cloud_sync_status,
+            cmd::cloud_sync::sync_push_now,
+            cmd::cloud_sync::sync_pull_now,
+            cmd::cloud_sync::resolve_cloud_sync_conflict,
+            cmd::cloud_sync::run_cloud_backup_now,
+            cmd::cloud_sync::list_cloud_sync_history,
+            cmd::cloud_sync::list_remote_backups,
+            cmd::cloud_sync::restore_remote_backup,
             cmd::session::create_ssh_session,
             cmd::session::create_local_session,
             cmd::session::create_telnet_session,
@@ -94,6 +105,7 @@ pub fn run() {
             cmd::connection::save_password,
             cmd::connection::delete_password,
             cmd::settings::get_app_settings,
+            cmd::settings::get_master_password_value,
             cmd::settings::save_app_settings,
             cmd::settings::verify_master_password,
             cmd::watcher::start_file_watch,

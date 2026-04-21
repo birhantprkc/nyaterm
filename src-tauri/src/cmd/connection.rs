@@ -5,6 +5,12 @@ use crate::utils::crypto;
 use std::sync::Arc;
 use tauri::Emitter;
 
+fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+}
+
 #[tauri::command]
 pub fn get_saved_connections(app: tauri::AppHandle) -> AppResult<Vec<SavedConnection>> {
     let cfg = config::load_config(&app)?;
@@ -63,6 +69,7 @@ pub fn save_connection(
     }
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -217,6 +224,7 @@ pub fn delete_connection(app: tauri::AppHandle, id: String) -> AppResult<()> {
     cfg.connections.retain(|c| c.id != id);
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -245,6 +253,7 @@ pub fn reorder_items(
     }
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -294,6 +303,7 @@ pub fn save_ssh_key(app: tauri::AppHandle, mut key: SshKey) -> AppResult<String>
         cfg.keys.push(key);
     }
     config::save_keys(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -301,7 +311,9 @@ pub fn save_ssh_key(app: tauri::AppHandle, mut key: SshKey) -> AppResult<String>
 pub fn delete_ssh_key(app: tauri::AppHandle, id: String) -> AppResult<()> {
     let mut cfg = config::load_keys(&app)?;
     cfg.keys.retain(|k| k.id != id);
-    config::save_keys(&app, &cfg)
+    config::save_keys(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -326,6 +338,7 @@ pub fn save_group(app: tauri::AppHandle, mut group: Group) -> AppResult<String> 
     }
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -358,6 +371,7 @@ pub fn delete_group(app: tauri::AppHandle, id: String) -> AppResult<()> {
 
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -368,6 +382,7 @@ pub fn clear_all_connections(app: tauri::AppHandle) -> AppResult<()> {
     cfg.groups.clear();
     config::save_config(&app, &cfg)?;
     let _ = app.emit("connections-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -386,6 +401,7 @@ pub fn save_quick_commands(
 ) -> AppResult<()> {
     state.save_all(&app, config)?;
     let _ = app.emit("quick-commands-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -398,6 +414,7 @@ pub fn upsert_quick_command(
 ) -> AppResult<()> {
     state.upsert(&app, command, new_category)?;
     let _ = app.emit("quick-commands-changed", ());
+    schedule_cloud_sync_notify(app.clone());
     Ok(())
 }
 
@@ -438,6 +455,7 @@ pub fn save_password(app: tauri::AppHandle, mut entry: SavedPassword) -> AppResu
         cfg.passwords.push(entry);
     }
     config::save_passwords(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -445,5 +463,7 @@ pub fn save_password(app: tauri::AppHandle, mut entry: SavedPassword) -> AppResu
 pub fn delete_password(app: tauri::AppHandle, id: String) -> AppResult<()> {
     let mut cfg = config::load_passwords(&app)?;
     cfg.passwords.retain(|p| p.id != id);
-    config::save_passwords(&app, &cfg)
+    config::save_passwords(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }

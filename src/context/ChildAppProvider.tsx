@@ -1,5 +1,6 @@
 import { emit } from "@tauri-apps/api/event";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { DEFAULT_CLOUD_SYNC_SETTINGS } from "@/lib/cloudSync";
 import type { AppSettings, Group, SavedConnection, UiConfig } from "@/types/global";
 import i18n from "../i18n";
 import { invoke } from "../lib/invoke";
@@ -84,6 +85,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     level: "info",
     retention_days: 7,
   },
+  cloud_sync: DEFAULT_CLOUD_SYNC_SETTINGS,
   ui: {
     open_tabs: [],
     left_width: 256,
@@ -102,7 +104,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     transfer_height: 180,
     activity_bar_layout: {
       left_top: ["fileExplorer", "network", "securityAuth"],
-      left_bottom: ["settings"],
+      left_bottom: ["syncBackupHistory", "settings"],
       right_top: ["savedConnections", "activeSessions", "commandHistory", "resourceMonitor"],
       right_bottom: ["quickCmdBar", "serialSend", "recording", "lock"],
       show_labels: false,
@@ -142,6 +144,12 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
     document.documentElement.style.fontSize = `${appSettings.appearance.ui_font_size}px`;
   }, [appSettings.appearance.ui_font_size]);
 
+  useEffect(() => {
+    if (appSettings.ui?.language && appSettings.ui.language !== i18n.language) {
+      i18n.changeLanguage(appSettings.ui.language);
+    }
+  }, [appSettings.ui?.language]);
+
   const updateAppSettings = useCallback(
     (updates: Partial<AppSettings> | ((prev: AppSettings) => Partial<AppSettings>)) => {
       setAppSettings((prev) => {
@@ -167,6 +175,15 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const replaceAppSettings = useCallback((next: AppSettings) => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    setLoggerLevel(next.diagnostics.level);
+    setAppSettings(next);
+  }, []);
 
   const updateUi = useCallback(
     (updates: Partial<UiConfig> | ((prev: UiConfig) => Partial<UiConfig>)) => {
@@ -209,6 +226,7 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
       persistTabsNow: noopAsync,
       appSettings,
       updateAppSettings,
+      replaceAppSettings,
       updateUi,
       savedConnections: emptyConnections,
       savedGroups: emptyGroups,
@@ -232,6 +250,7 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
       emptyGroups,
       appSettings,
       updateAppSettings,
+      replaceAppSettings,
       updateUi,
       settingsLoaded,
     ],

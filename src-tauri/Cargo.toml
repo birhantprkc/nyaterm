@@ -78,6 +78,11 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 rqrr = "0.9"
 serialport = "4"
 arboard = "3"
+opendal = { version = "0.55", features = [
+    "services-s3",
+    "services-webdav",
+    "layers-tracing",
+] }
 
 [profile.release]
 lto = true

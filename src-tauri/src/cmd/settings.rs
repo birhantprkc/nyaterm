@@ -1,7 +1,15 @@
 use crate::config;
+use crate::core::CloudSyncManager;
 use crate::error::AppResult;
 use crate::observability::{self, StructuredLog, StructuredLogLevel};
 use crate::utils::crypto;
+use std::sync::Arc;
+
+fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+}
 
 #[tauri::command]
 pub fn get_system_fonts() -> Vec<String> {
@@ -20,12 +28,25 @@ pub fn get_app_settings(app: tauri::AppHandle) -> AppResult<config::AppSettings>
     if settings.security.master_password.is_some() {
         settings.security.master_password = Some("__SET__".to_string());
     }
+    settings.cloud_sync = config::mask_cloud_sync_settings(settings.cloud_sync);
     Ok(settings)
 }
 
 #[tauri::command]
-pub fn save_app_settings(
+pub fn get_master_password_value(app: tauri::AppHandle) -> AppResult<Option<String>> {
+    let settings = config::load_app_settings(&app)?;
+    settings
+        .security
+        .master_password
+        .as_deref()
+        .map(crypto::decrypt_settings_secret)
+        .transpose()
+}
+
+#[tauri::command]
+pub async fn save_app_settings(
     app: tauri::AppHandle,
+    manager: tauri::State<'_, Arc<CloudSyncManager>>,
     mut settings: config::AppSettings,
 ) -> AppResult<()> {
     let existing = match config::load_app_settings(&app) {
@@ -72,7 +93,14 @@ pub fn save_app_settings(
             settings.security.master_password = Some(crypto::encrypt_settings_secret(plain)?);
         }
     }
-    if let Err(error) = config::save_app_settings(&app, &settings) {
+    let merged_cloud_sync =
+        config::merge_masked_cloud_sync_settings(&existing.cloud_sync, settings.cloud_sync);
+    settings.cloud_sync = merged_cloud_sync.clone();
+
+    let mut persisted_settings = settings.clone();
+    persisted_settings.cloud_sync = config::encrypt_cloud_sync_settings(merged_cloud_sync.clone())?;
+
+    if let Err(error) = config::save_app_settings(&app, &persisted_settings) {
         observability::log_event(StructuredLog {
             level: StructuredLogLevel::Error,
             domain: "settings.persistence".to_string(),
@@ -88,6 +116,9 @@ pub fn save_app_settings(
         });
         return Err(error);
     }
+
+    manager.replace_settings(merged_cloud_sync).await?;
+    schedule_cloud_sync_notify(app.clone());
 
     Ok(())
 }

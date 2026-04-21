@@ -26,6 +26,7 @@ import {
   updateSessionPane,
   updateSplitRatio as updateWorkspaceSplitRatio,
 } from "@/lib/workspaceTabs";
+import { DEFAULT_CLOUD_SYNC_SETTINGS } from "@/lib/cloudSync";
 import type {
   AppSettings,
   Group,
@@ -104,6 +105,7 @@ interface AppContextType {
   updateAppSettings: (
     updates: Partial<AppSettings> | ((prev: AppSettings) => Partial<AppSettings>),
   ) => void;
+  replaceAppSettings: (next: AppSettings) => void;
   updateUi: (updates: Partial<UiConfig> | ((prev: UiConfig) => Partial<UiConfig>)) => void;
 
   // Data
@@ -221,6 +223,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     level: "info",
     retention_days: 7,
   },
+  cloud_sync: DEFAULT_CLOUD_SYNC_SETTINGS,
   ui: {
     open_tabs: [],
     left_width: 256,
@@ -239,7 +242,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     transfer_height: 180,
     activity_bar_layout: {
       left_top: ["fileExplorer", "network", "securityAuth"],
-      left_bottom: ["settings"],
+      left_bottom: ["syncBackupHistory", "settings"],
       right_top: ["savedConnections", "activeSessions", "commandHistory", "resourceMonitor"],
       right_bottom: ["quickCmdBar", "serialSend", "recording", "lock"],
       show_labels: false,
@@ -297,7 +300,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       })
       .catch(() => {
+        appSettingsRef.current = DEFAULT_APP_SETTINGS;
         appSettingsLoaded.current = true;
+        setAppSettings(DEFAULT_APP_SETTINGS);
         setSettingsLoaded(true);
       });
   }, []);
@@ -333,6 +338,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     [],
   );
+
+  const replaceAppSettings = useCallback((next: AppSettings) => {
+    if (appSettingsSaveTimerRef.current) {
+      clearTimeout(appSettingsSaveTimerRef.current);
+      appSettingsSaveTimerRef.current = null;
+    }
+    appSettingsRef.current = next;
+    setLoggerLevel(next.diagnostics.level);
+    setAppSettings(next);
+  }, []);
 
   // Convenience helper to update just the UI config portion
   const updateUi = useCallback(
@@ -871,6 +886,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persistTabsNow,
       appSettings,
       updateAppSettings,
+      replaceAppSettings,
       updateUi,
       savedConnections,
       savedGroups,
@@ -907,6 +923,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persistTabsNow,
       appSettings,
       updateAppSettings,
+      replaceAppSettings,
       updateUi,
       savedConnections,
       savedGroups,

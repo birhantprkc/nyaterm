@@ -6,6 +6,7 @@ import { BiServer } from "react-icons/bi";
 import { FaRegFolder } from "react-icons/fa";
 import { LuKeyRound } from "react-icons/lu";
 import {
+  MdBackup,
   MdBolt,
   MdClose,
   MdHistory,
@@ -38,6 +39,7 @@ import ResourceMonitor from "./components/panel/ResourceMonitor";
 import SerialSendPanel from "./components/panel/SendCommandPanel";
 import SavedConnections from "./components/panel/saved-connections";
 import SecurityAuthPanel from "./components/panel/security-auth";
+import SyncBackupHistoryPanel from "./components/panel/SyncBackupHistoryPanel";
 import TabWindowsWorkspace from "./components/terminal/TabWindowsWorkspace";
 import { useApp } from "./context/AppContext";
 import { TransferProvider } from "./context/TransferContext";
@@ -86,6 +88,7 @@ import type {
   ActivityBarLayout,
   ActivityBarZone,
   AppSettings,
+  CloudConflictPreview,
   PaneSplitDirection,
   SavedConnection,
   SessionPane,
@@ -166,6 +169,7 @@ function App() {
     persistTabsNow,
     updateUi,
     updateAppSettings,
+    replaceAppSettings,
     appSettings,
     closeTabs,
     savedConnections,
@@ -209,6 +213,7 @@ function App() {
 
   // OTP / 2FA dialog state
   const [otpRequest, setOtpRequest] = useState<OtpRequest | null>(null);
+  const lastCloudConflictRevisionRef = useRef<string | null>(null);
 
   // Idle auto-lock
   useIdleLock(
@@ -238,7 +243,7 @@ function App() {
     unsubs.push(
       listen<AppSettings>("settings-changed", () => {
         invoke<AppSettings>("get_app_settings").then((cfg) => {
-          updateAppSettings(() => cfg);
+          replaceAppSettings(cfg);
         });
       }),
     );
@@ -396,8 +401,42 @@ function App() {
     setActiveTabId,
     updatePaneSession,
     updateTabSession,
-    updateAppSettings,
+    replaceAppSettings,
   ]);
+
+  useEffect(() => {
+    const unlisten = listen<CloudConflictPreview | null>("cloud-sync-conflict", (event) => {
+      const conflict = event.payload;
+      if (!conflict) return;
+      if (lastCloudConflictRevisionRef.current === conflict.remote_revision) {
+        return;
+      }
+
+      lastCloudConflictRevisionRef.current = conflict.remote_revision;
+      toast.error(conflict.message);
+      updateUi((prev) => {
+        const side = getItemSide("syncBackupHistory", prev.activity_bar_layout);
+        if (side === "right") {
+          return {
+            active_right_panel: "syncBackupHistory",
+            ...(prev.active_left_panel === "syncBackupHistory"
+              ? { active_left_panel: null }
+              : {}),
+          };
+        }
+        return {
+          active_left_panel: "syncBackupHistory",
+          ...(prev.active_right_panel === "syncBackupHistory"
+            ? { active_right_panel: null }
+            : {}),
+        };
+      });
+    });
+
+    return () => {
+      unlisten.then((dispose) => dispose());
+    };
+  }, [updateUi]);
 
   // Track modal child window open/close for overlay and focus enforcement.
   useEffect(() => {
@@ -1339,6 +1378,7 @@ function App() {
       fileExplorer: { icon: <FaRegFolder />, tooltip: t("panel.fileExplorer") },
       network: { icon: <MdLan />, tooltip: t("panel.network") },
       securityAuth: { icon: <LuKeyRound />, tooltip: t("securityAuth.title") },
+      syncBackupHistory: { icon: <MdBackup />, tooltip: t("panel.syncBackupHistory") },
       settings: { icon: <MdSettings />, tooltip: t("settings.title") },
       savedConnections: { icon: <BiServer />, tooltip: t("panel.savedConnections") },
       activeSessions: { icon: <MdLink />, tooltip: t("panel.activeSessions") },
@@ -1375,12 +1415,23 @@ function App() {
       ...layout.right_top,
       ...layout.right_bottom,
     ];
+    const needsSyncBackupHistory = !allIds.includes("syncBackupHistory");
     const needsSerialSend = !allIds.includes("serialSend");
     const needsRecording = !allIds.includes("recording");
-    if (!needsSerialSend && !needsRecording) return;
+    if (!needsSyncBackupHistory && !needsSerialSend && !needsRecording) return;
 
     updateUi((prev) => {
+      const nextLeftBottom = [...prev.activity_bar_layout.left_bottom];
       const nextRightBottom = [...prev.activity_bar_layout.right_bottom];
+
+      if (!nextLeftBottom.includes("syncBackupHistory")) {
+        const settingsIndex = nextLeftBottom.indexOf("settings");
+        if (settingsIndex !== -1) {
+          nextLeftBottom.splice(settingsIndex, 0, "syncBackupHistory");
+        } else {
+          nextLeftBottom.push("syncBackupHistory");
+        }
+      }
 
       if (!nextRightBottom.includes("serialSend")) {
         const quickCmdIndex = nextRightBottom.indexOf("quickCmdBar");
@@ -1412,6 +1463,7 @@ function App() {
       return {
         activity_bar_layout: {
           ...prev.activity_bar_layout,
+          left_bottom: nextLeftBottom,
           right_bottom: nextRightBottom,
         },
       };
@@ -1599,6 +1651,8 @@ function App() {
         return <NetworkPanel />;
       case "securityAuth":
         return <SecurityAuthPanel />;
+      case "syncBackupHistory":
+        return <SyncBackupHistoryPanel />;
       case "savedConnections":
         return (
           <SavedConnections

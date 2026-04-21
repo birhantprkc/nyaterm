@@ -4,9 +4,12 @@
 //! and common error types under one backend-oriented namespace.
 
 pub mod backup;
+pub mod cloud_crypto;
+pub mod cloud_sync;
 pub mod history;
 pub mod importer;
 mod output;
+pub mod portable_snapshot;
 mod pty;
 mod quick_commands;
 mod recording;
@@ -18,6 +21,7 @@ pub mod telnet;
 pub mod translate;
 pub mod watcher;
 
+pub use cloud_sync::CloudSyncManager;
 pub(crate) use output::SessionOutputCoalescer;
 pub use pty::{create_local_session, LocalSessionConfig};
 pub use quick_commands::QuickCommandsStore;

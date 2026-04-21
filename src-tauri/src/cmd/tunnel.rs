@@ -4,6 +4,12 @@ use crate::error::{AppError, AppResult};
 use std::sync::Arc;
 use tauri::Manager;
 
+fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+}
+
 #[tauri::command]
 pub async fn get_tunnels(app: tauri::AppHandle) -> AppResult<Vec<config::TunnelConfig>> {
     let mut tunnels = config::load_tunnels(&app)?;
@@ -29,7 +35,9 @@ pub async fn save_tunnel(
     } else {
         tunnels.push(tunnel);
     }
-    config::save_tunnels(&app, &tunnels)
+    config::save_tunnels(&app, &tunnels)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }
 
 #[tauri::command]
@@ -43,7 +51,9 @@ pub async fn delete_tunnel(
     }
     let mut tunnels = config::load_tunnels(&app)?;
     tunnels.retain(|t| t.id != tunnel_id);
-    config::save_tunnels(&app, &tunnels)
+    config::save_tunnels(&app, &tunnels)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }
 
 #[tauri::command]

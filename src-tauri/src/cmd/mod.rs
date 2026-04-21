@@ -1,5 +1,6 @@
 pub mod backup;
 pub mod clipboard;
+pub mod cloud_sync;
 pub mod connection;
 pub mod importer;
 pub mod log;

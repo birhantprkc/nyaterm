@@ -207,13 +207,14 @@ export interface RestorableTab {
   tab_color?: string;
 }
 
-export type LeftPanelId = "fileExplorer" | "fileTransfer" | "securityAuth";
+export type LeftPanelId = "fileExplorer" | "network" | "securityAuth" | "syncBackupHistory";
 
 export type RightPanelId =
   | "savedConnections"
   | "activeSessions"
   | "commandHistory"
-  | "resourceMonitor";
+  | "resourceMonitor"
+  | "syncBackupHistory";
 
 export type ActivityBarZone = "left_top" | "left_bottom" | "right_top" | "right_bottom";
 
@@ -491,6 +492,7 @@ export interface AppSettings {
   interaction: InteractionSettings;
   transfer: TransferSettings;
   diagnostics: DiagnosticsSettings;
+  cloud_sync: CloudSyncSettings;
   ui: UiConfig;
 }
 
@@ -505,4 +507,81 @@ export interface FileEntry {
 export interface FileExplorerProps {
   activeSessionId: string | null;
   activeSessionType: SessionType | null;
+}
+
+export interface WebdavSyncSettings {
+  endpoint: string;
+  root: string;
+  username: string;
+  password?: string | null;
+}
+
+export interface S3SyncSettings {
+  endpoint: string;
+  bucket: string;
+  region: string;
+  root: string;
+  access_key_id?: string | null;
+  secret_access_key?: string | null;
+  session_token?: string | null;
+  virtual_host_style: boolean;
+}
+
+export interface CloudSyncSettings {
+  enabled: boolean;
+  provider: string;
+  remote_root: string;
+  device_name: string;
+  auto_check_on_startup: boolean;
+  auto_push_on_change: boolean;
+  sync_debounce_seconds: number;
+  scheduled_backup_enabled: boolean;
+  backup_interval_hours: number;
+  backup_retention_count: number;
+  webdav: WebdavSyncSettings;
+  s3: S3SyncSettings;
+}
+
+export interface CloudConflictPreview {
+  detected_at_ms: number;
+  provider: string;
+  local_payload_hash: string;
+  remote_payload_hash: string;
+  remote_revision: string;
+  remote_created_at_ms: number;
+  remote_device_id: string;
+  message: string;
+}
+
+export interface CloudSyncStatus {
+  enabled: boolean;
+  provider: string;
+  state: string;
+  message: string;
+  current_operation?: string | null;
+  last_checked_at_ms?: number | null;
+  last_synced_at_ms?: number | null;
+  last_backup_at_ms?: number | null;
+  conflict?: CloudConflictPreview | null;
+}
+
+export interface CloudSyncHistoryEntry {
+  id: string;
+  timestamp_ms: number;
+  kind: string;
+  status: string;
+  trigger: string;
+  provider?: string | null;
+  revision?: string | null;
+  duration_ms?: number | null;
+  message: string;
+}
+
+export interface RemoteBackupEntry {
+  revision: string;
+  created_at_ms: number;
+  payload_hash: string;
+  device_id: string;
+  app_version: string;
+  message: string;
 }

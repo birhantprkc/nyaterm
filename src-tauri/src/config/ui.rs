@@ -163,7 +163,7 @@ fn default_left_top() -> Vec<String> {
 }
 
 fn default_left_bottom() -> Vec<String> {
-    vec!["settings".to_string()]
+    vec!["syncBackupHistory".to_string(), "settings".to_string()]
 }
 
 fn default_right_top() -> Vec<String> {

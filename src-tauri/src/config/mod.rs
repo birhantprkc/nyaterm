@@ -2,6 +2,7 @@
 //!
 //! Stores JSON files in `~/.dragonfly/`. Credentials are AES-256-GCM encrypted in-place.
 
+mod cloud_sync;
 mod connection;
 mod key;
 mod otp;
@@ -12,6 +13,14 @@ mod settings;
 mod tunnel;
 mod ui;
 
+#[allow(unused_imports)]
+pub use cloud_sync::{
+    decrypt_cloud_sync_settings, encrypt_cloud_sync_settings, load_cloud_sync_settings,
+    load_cloud_sync_state, mask_cloud_sync_settings, merge_masked_cloud_sync_settings,
+    save_cloud_sync_state, CloudConflictPreview, CloudSyncHistoryEntry, CloudSyncSettings,
+    CloudSyncState, CloudSyncStatus, RemoteBackupEntry, RemoteBackupIndex, S3SyncSettings,
+    WebdavSyncSettings, CLOUD_SYNC_HISTORY_VERSION, MASKED_SECRET_VALUE,
+};
 #[allow(unused_imports)]
 pub use connection::{
     load_config, load_connection_by_id, load_sessions, save_config, save_sessions, AppConfig,
@@ -41,6 +50,8 @@ pub use settings::{
 };
 #[allow(unused_imports)]
 pub use tunnel::{load_tunnels, save_tunnels, TunnelConfig, TunnelsConfig};
+#[allow(unused_imports)]
+pub use ui::{ActivityBarLayout, RestorablePaneNode, RestorableTab, UiConfig};
 
 use crate::error::{AppError, AppResult};
 use serde::Serialize;

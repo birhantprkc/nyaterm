@@ -20,6 +20,10 @@ pub use terminal::{ActionLinksMatcherSettings, KeywordHighlightRule, TerminalSet
 pub use transfer::TransferSettings;
 pub use translation::TranslationSettings;
 
+use super::cloud_sync::{
+    decrypt_cloud_sync_settings, encrypt_cloud_sync_settings, load_cloud_sync_settings,
+    CloudSyncSettings,
+};
 use super::ui::UiConfig;
 use super::{get_config_dir, load_json, save_json};
 use crate::error::AppResult;
@@ -49,14 +53,33 @@ pub struct AppSettings {
     #[serde(default)]
     pub diagnostics: DiagnosticsSettings,
     #[serde(default)]
+    pub cloud_sync: CloudSyncSettings,
+    #[serde(default)]
     pub ui: UiConfig,
 }
 
 pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
     let dir = get_config_dir(app)?;
-    let mut settings: AppSettings = load_json(&dir.join("settings.json"))?;
+    let settings_path = dir.join("settings.json");
+    let mut settings: AppSettings = load_json(&settings_path)?;
+    let has_embedded_cloud_sync = settings_path.exists()
+        && std::fs::read_to_string(&settings_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|value| value.get("cloud_sync").cloned())
+            .is_some();
 
     let mut migrated = false;
+
+    if has_embedded_cloud_sync {
+        settings.cloud_sync =
+            decrypt_cloud_sync_settings(settings.cloud_sync.clone()).unwrap_or(settings.cloud_sync);
+    } else if let Ok(legacy_cloud_sync) =
+        load_cloud_sync_settings(app).and_then(decrypt_cloud_sync_settings)
+    {
+        settings.cloud_sync = legacy_cloud_sync;
+        migrated = true;
+    }
 
     for list in [
         &mut settings.ui.activity_bar_layout.left_top,
@@ -131,6 +154,28 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
             .chain(&settings.ui.activity_bar_layout.right_bottom)
             .map(|s| s.as_str())
             .collect();
+        if !all_ids.contains(&"syncBackupHistory") {
+            let left_bottom = &mut settings.ui.activity_bar_layout.left_bottom;
+            if let Some(settings_index) = left_bottom.iter().position(|id| id == "settings") {
+                left_bottom.insert(settings_index, "syncBackupHistory".to_string());
+            } else {
+                left_bottom.push("syncBackupHistory".to_string());
+            }
+            migrated = true;
+        }
+    }
+
+    {
+        let all_ids: Vec<&str> = settings
+            .ui
+            .activity_bar_layout
+            .left_top
+            .iter()
+            .chain(&settings.ui.activity_bar_layout.left_bottom)
+            .chain(&settings.ui.activity_bar_layout.right_top)
+            .chain(&settings.ui.activity_bar_layout.right_bottom)
+            .map(|s| s.as_str())
+            .collect();
         if !all_ids.contains(&"serialSend") {
             let right_bottom = &mut settings.ui.activity_bar_layout.right_bottom;
             if let Some(quick_cmd_index) = right_bottom.iter().position(|id| id == "quickCmdBar") {
@@ -179,7 +224,9 @@ pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
     }
 
     if migrated {
-        let _ = save_app_settings(app, &settings);
+        let mut persisted = settings.clone();
+        persisted.cloud_sync = encrypt_cloud_sync_settings(persisted.cloud_sync.clone())?;
+        let _ = save_app_settings(app, &persisted);
     }
 
     Ok(settings)

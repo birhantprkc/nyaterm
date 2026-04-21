@@ -2,6 +2,12 @@ use crate::config::{self, ProxyConfig};
 use crate::error::AppResult;
 use crate::utils::crypto;
 
+fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+}
+
 #[tauri::command]
 pub fn get_proxies(app: tauri::AppHandle) -> AppResult<Vec<ProxyConfig>> {
     let mut proxies = config::load_proxies(&app)?;
@@ -34,6 +40,7 @@ pub fn save_proxy(app: tauri::AppHandle, mut proxy: ProxyConfig) -> AppResult<St
     }
 
     config::save_proxies(&app, &proxies)?;
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -41,7 +48,9 @@ pub fn save_proxy(app: tauri::AppHandle, mut proxy: ProxyConfig) -> AppResult<St
 pub fn delete_proxy(app: tauri::AppHandle, proxy_id: String) -> AppResult<()> {
     let mut proxies = config::load_proxies(&app)?;
     proxies.retain(|p| p.id != proxy_id);
-    config::save_proxies(&app, &proxies)
+    config::save_proxies(&app, &proxies)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }
 
 #[tauri::command]

@@ -157,6 +157,19 @@ impl SessionManager {
         }
     }
 
+    /// Reload command history from a specific on-disk path and notify listeners.
+    pub async fn reload_history_from_disk(&self, history_path: PathBuf) -> AppResult<()> {
+        {
+            let mut store = self.history_store.lock().await;
+            store.set_history_path(history_path);
+            store.load()?;
+        }
+        if let Some(app) = self.app_handle.get() {
+            let _ = app.emit("command-history-changed", ());
+        }
+        Ok(())
+    }
+
     /// Registers a new active session.
     pub async fn add_session(&self, handle: SessionHandle) {
         let id = handle.info.id.clone();

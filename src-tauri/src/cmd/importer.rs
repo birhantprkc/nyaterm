@@ -2,5 +2,9 @@ use crate::error::AppResult;
 
 #[tauri::command]
 pub fn import_sessions(app: tauri::AppHandle, file_path: String) -> AppResult<usize> {
-    crate::core::importer::import_sessions(app, file_path)
+    let count = crate::core::importer::import_sessions(app.clone(), file_path)?;
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+    Ok(count)
 }

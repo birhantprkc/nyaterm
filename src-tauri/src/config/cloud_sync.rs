@@ -1,0 +1,359 @@
+use super::{default_true, get_config_dir, load_json, save_json, uuid_v4};
+use crate::error::AppResult;
+use crate::utils::crypto;
+use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use tauri::AppHandle;
+
+pub const MASKED_SECRET_VALUE: &str = "__SET__";
+pub const CLOUD_SYNC_HISTORY_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebdavSyncSettings {
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub username: String,
+    #[serde(default)]
+    pub password: Option<String>,
+}
+
+impl Default for WebdavSyncSettings {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            root: String::new(),
+            username: String::new(),
+            password: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3SyncSettings {
+    #[serde(default)]
+    pub endpoint: String,
+    #[serde(default)]
+    pub bucket: String,
+    #[serde(default)]
+    pub region: String,
+    #[serde(default)]
+    pub root: String,
+    #[serde(default)]
+    pub access_key_id: Option<String>,
+    #[serde(default)]
+    pub secret_access_key: Option<String>,
+    #[serde(default)]
+    pub session_token: Option<String>,
+    #[serde(default)]
+    pub virtual_host_style: bool,
+}
+
+impl Default for S3SyncSettings {
+    fn default() -> Self {
+        Self {
+            endpoint: String::new(),
+            bucket: String::new(),
+            region: String::new(),
+            root: String::new(),
+            access_key_id: None,
+            secret_access_key: None,
+            session_token: None,
+            virtual_host_style: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudSyncSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_provider")]
+    pub provider: String,
+    #[serde(default = "default_remote_root")]
+    pub remote_root: String,
+    #[serde(default = "default_device_name")]
+    pub device_name: String,
+    #[serde(default = "default_true")]
+    pub auto_check_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub auto_push_on_change: bool,
+    #[serde(default = "default_sync_debounce_seconds")]
+    pub sync_debounce_seconds: u64,
+    #[serde(default = "default_true")]
+    pub scheduled_backup_enabled: bool,
+    #[serde(default = "default_backup_interval_hours")]
+    pub backup_interval_hours: u64,
+    #[serde(default = "default_backup_retention_count")]
+    pub backup_retention_count: usize,
+    #[serde(default)]
+    pub webdav: WebdavSyncSettings,
+    #[serde(default)]
+    pub s3: S3SyncSettings,
+}
+
+impl Default for CloudSyncSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: default_provider(),
+            remote_root: default_remote_root(),
+            device_name: default_device_name(),
+            auto_check_on_startup: true,
+            auto_push_on_change: true,
+            sync_debounce_seconds: default_sync_debounce_seconds(),
+            scheduled_backup_enabled: true,
+            backup_interval_hours: default_backup_interval_hours(),
+            backup_retention_count: default_backup_retention_count(),
+            webdav: WebdavSyncSettings::default(),
+            s3: S3SyncSettings::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CloudSyncState {
+    #[serde(default = "uuid_v4")]
+    pub device_id: String,
+    #[serde(default)]
+    pub last_synced_payload_hash: Option<String>,
+    #[serde(default)]
+    pub last_applied_remote_revision: Option<String>,
+    #[serde(default)]
+    pub last_backup_revision: Option<String>,
+    #[serde(default)]
+    pub last_checked_at_ms: Option<u64>,
+    #[serde(default)]
+    pub last_synced_at_ms: Option<u64>,
+    #[serde(default)]
+    pub last_backup_at_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudConflictPreview {
+    pub detected_at_ms: u64,
+    pub provider: String,
+    pub local_payload_hash: String,
+    pub remote_payload_hash: String,
+    pub remote_revision: String,
+    pub remote_created_at_ms: u64,
+    #[serde(default)]
+    pub remote_device_id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudSyncStatus {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub provider: String,
+    #[serde(default = "default_status_state")]
+    pub state: String,
+    #[serde(default)]
+    pub message: String,
+    #[serde(default)]
+    pub current_operation: Option<String>,
+    #[serde(default)]
+    pub last_checked_at_ms: Option<u64>,
+    #[serde(default)]
+    pub last_synced_at_ms: Option<u64>,
+    #[serde(default)]
+    pub last_backup_at_ms: Option<u64>,
+    #[serde(default)]
+    pub conflict: Option<CloudConflictPreview>,
+}
+
+impl Default for CloudSyncStatus {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            provider: default_provider(),
+            state: default_status_state(),
+            message: String::new(),
+            current_operation: None,
+            last_checked_at_ms: None,
+            last_synced_at_ms: None,
+            last_backup_at_ms: None,
+            conflict: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudSyncHistoryEntry {
+    #[serde(default = "uuid_v4")]
+    pub id: String,
+    pub timestamp_ms: u64,
+    pub kind: String,
+    pub status: String,
+    pub trigger: String,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub revision: Option<String>,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteBackupEntry {
+    pub revision: String,
+    pub created_at_ms: u64,
+    pub payload_hash: String,
+    pub device_id: String,
+    pub app_version: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RemoteBackupIndex {
+    #[serde(default = "default_history_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub entries: Vec<RemoteBackupEntry>,
+}
+
+fn default_provider() -> String {
+    "webdav".to_string()
+}
+
+fn default_remote_root() -> String {
+    "dragonfly".to_string()
+}
+
+fn default_device_name() -> String {
+    std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "This Device".to_string())
+}
+
+fn default_sync_debounce_seconds() -> u64 {
+    15
+}
+
+fn default_backup_interval_hours() -> u64 {
+    24
+}
+
+fn default_backup_retention_count() -> usize {
+    30
+}
+
+fn default_status_state() -> String {
+    "idle".to_string()
+}
+
+fn default_history_version() -> u32 {
+    CLOUD_SYNC_HISTORY_VERSION
+}
+
+fn cloud_sync_path(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(get_config_dir(app)?.join("cloud_sync.json"))
+}
+
+fn cloud_sync_state_path(app: &AppHandle) -> AppResult<PathBuf> {
+    Ok(get_config_dir(app)?.join("cloud_sync_state.json"))
+}
+
+pub fn load_cloud_sync_settings(app: &AppHandle) -> AppResult<CloudSyncSettings> {
+    load_json(&cloud_sync_path(app)?)
+}
+
+pub fn load_cloud_sync_state(app: &AppHandle) -> AppResult<CloudSyncState> {
+    let mut state: CloudSyncState = load_json(&cloud_sync_state_path(app)?)?;
+    if state.device_id.is_empty() {
+        state.device_id = uuid_v4();
+    }
+    Ok(state)
+}
+
+pub fn save_cloud_sync_state(app: &AppHandle, state: &CloudSyncState) -> AppResult<()> {
+    save_json(&cloud_sync_state_path(app)?, state)
+}
+
+pub fn decrypt_cloud_sync_settings(
+    mut settings: CloudSyncSettings,
+) -> AppResult<CloudSyncSettings> {
+    settings.webdav.password = decrypt_secret(settings.webdav.password)?;
+    settings.s3.access_key_id = decrypt_secret(settings.s3.access_key_id)?;
+    settings.s3.secret_access_key = decrypt_secret(settings.s3.secret_access_key)?;
+    settings.s3.session_token = decrypt_secret(settings.s3.session_token)?;
+    Ok(settings)
+}
+
+pub fn encrypt_cloud_sync_settings(
+    mut settings: CloudSyncSettings,
+) -> AppResult<CloudSyncSettings> {
+    settings.webdav.password = encrypt_secret(settings.webdav.password)?;
+    settings.s3.access_key_id = encrypt_secret(settings.s3.access_key_id)?;
+    settings.s3.secret_access_key = encrypt_secret(settings.s3.secret_access_key)?;
+    settings.s3.session_token = encrypt_secret(settings.s3.session_token)?;
+    Ok(settings)
+}
+
+pub fn mask_cloud_sync_settings(mut settings: CloudSyncSettings) -> CloudSyncSettings {
+    settings.webdav.password = mask_secret(settings.webdav.password);
+    settings.s3.access_key_id = mask_secret(settings.s3.access_key_id);
+    settings.s3.secret_access_key = mask_secret(settings.s3.secret_access_key);
+    settings.s3.session_token = mask_secret(settings.s3.session_token);
+    settings
+}
+
+pub fn merge_masked_cloud_sync_settings(
+    current: &CloudSyncSettings,
+    mut next: CloudSyncSettings,
+) -> CloudSyncSettings {
+    next.webdav.password = merge_secret(
+        current.webdav.password.as_ref(),
+        next.webdav.password.as_ref(),
+    );
+    next.s3.access_key_id = merge_secret(
+        current.s3.access_key_id.as_ref(),
+        next.s3.access_key_id.as_ref(),
+    );
+    next.s3.secret_access_key = merge_secret(
+        current.s3.secret_access_key.as_ref(),
+        next.s3.secret_access_key.as_ref(),
+    );
+    next.s3.session_token = merge_secret(
+        current.s3.session_token.as_ref(),
+        next.s3.session_token.as_ref(),
+    );
+    next
+}
+
+fn decrypt_secret(value: Option<String>) -> AppResult<Option<String>> {
+    match value {
+        Some(ciphertext) if !ciphertext.is_empty() => crypto::decrypt(&ciphertext).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn encrypt_secret(value: Option<String>) -> AppResult<Option<String>> {
+    match value {
+        Some(plaintext) if !plaintext.is_empty() => crypto::encrypt(&plaintext).map(Some),
+        _ => Ok(None),
+    }
+}
+
+fn mask_secret(value: Option<String>) -> Option<String> {
+    value.and_then(|secret| {
+        if secret.is_empty() {
+            None
+        } else {
+            Some(MASKED_SECRET_VALUE.to_string())
+        }
+    })
+}
+
+fn merge_secret(current: Option<&String>, incoming: Option<&String>) -> Option<String> {
+    match incoming.map(String::as_str) {
+        Some(MASKED_SECRET_VALUE) | None => current.cloned(),
+        Some("") => None,
+        Some(value) => Some(value.to_string()),
+    }
+}

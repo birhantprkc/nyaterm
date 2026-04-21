@@ -4,6 +4,12 @@ use crate::error::AppResult;
 use crate::utils::crypto;
 use serde::Serialize;
 
+fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        crate::core::cloud_sync::notify_config_changed(&app).await;
+    });
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OtpCodeResult {
@@ -46,6 +52,7 @@ pub fn save_otp_entry(app: tauri::AppHandle, mut entry: OtpEntry) -> AppResult<S
         cfg.entries.push(entry);
     }
     config::save_otp_entries(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
     Ok(target_id)
 }
 
@@ -53,7 +60,9 @@ pub fn save_otp_entry(app: tauri::AppHandle, mut entry: OtpEntry) -> AppResult<S
 pub fn delete_otp_entry(app: tauri::AppHandle, id: String) -> AppResult<()> {
     let mut cfg = config::load_otp_entries(&app)?;
     cfg.entries.retain(|e| e.id != id);
-    config::save_otp_entries(&app, &cfg)
+    config::save_otp_entries(&app, &cfg)?;
+    schedule_cloud_sync_notify(app.clone());
+    Ok(())
 }
 
 #[tauri::command]
