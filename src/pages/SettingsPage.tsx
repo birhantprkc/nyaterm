@@ -1,4 +1,3 @@
-import { emit } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { type ComponentType, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -268,7 +267,6 @@ export default function SettingsPage() {
         const nextSettings = await invoke<AppSettings>("get_app_settings");
         app.replaceAppSettings(nextSettings);
         setDraftSettings(nextSettings);
-        await emit("settings-changed", nextSettings).catch(() => { });
 
         if (closeAfterSave) {
           await getCurrentWindow().close();

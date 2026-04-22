@@ -1,4 +1,3 @@
-import { emit } from "@tauri-apps/api/event";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DEFAULT_CLOUD_SYNC_SETTINGS } from "@/lib/cloudSync";
 import { DEFAULT_COMMAND_SUGGESTION_MAX_CHARS } from "@/lib/interactionSettings";
@@ -169,7 +168,6 @@ export function ChildAppProvider({ children }: { children: ReactNode }) {
                 error: e,
               }),
             );
-            emit("settings-changed", next).catch(() => {});
           }, 500);
         }
         return next;
