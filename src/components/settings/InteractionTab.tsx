@@ -5,7 +5,13 @@ import { SelectItem } from "@/components/ui/select";
 import { useApp } from "@/context/AppContext";
 import { MOD } from "@/hooks/useGlobalShortcuts";
 import {
+  MAX_COMMAND_SUGGESTION_MAX_CHARS,
+  MIN_COMMAND_SUGGESTION_MAX_CHARS,
+  normalizeCommandSuggestionMaxChars,
+} from "@/lib/interactionSettings";
+import {
   SettingInput,
+  SettingNumberInput,
   SettingRow,
   SettingSection,
   SettingSelect,
@@ -98,6 +104,25 @@ export function InteractionTab() {
             }
           />
         </SettingRow>
+
+        <SettingNumberInput
+          label={t("settings.commandSuggestionsMaxChars")}
+          desc={t("settings.commandSuggestionsMaxCharsDesc")}
+          value={appSettings.interaction.command_suggestion_max_chars}
+          min={MIN_COMMAND_SUGGESTION_MAX_CHARS}
+          max={MAX_COMMAND_SUGGESTION_MAX_CHARS}
+          step={1}
+          disabled={!appSettings.interaction.command_suggestions_enabled}
+          controlClassName="max-w-sm"
+          onChange={(v) =>
+            updateAppSettings({
+              interaction: {
+                ...appSettings.interaction,
+                command_suggestion_max_chars: normalizeCommandSuggestionMaxChars(v),
+              },
+            })
+          }
+        />
 
         <SettingInput
           label={t("settings.wordSeparators")}

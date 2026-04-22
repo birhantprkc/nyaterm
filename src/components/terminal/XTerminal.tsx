@@ -76,6 +76,7 @@ export default function XTerminal({
   const showTimestamps = appSettings.terminal.show_timestamps;
   const showGutter = showLineNumbers || showTimestamps;
   const commandSuggestionsEnabled = appSettings.interaction.command_suggestions_enabled;
+  const commandSuggestionMaxChars = appSettings.interaction.command_suggestion_max_chars;
 
   const inputStateRef = useRef(createTerminalInputState());
   const appSettingsRef = useRef(appSettings);
@@ -200,7 +201,13 @@ export default function XTerminal({
     triggerSearch,
     dismissSuggestions,
     handleSelectSuggestion,
-  } = useCommandHistory(terminalRef, inputStateRef, applySuggestion, commandSuggestionsEnabled);
+  } = useCommandHistory(
+    terminalRef,
+    inputStateRef,
+    applySuggestion,
+    commandSuggestionsEnabled,
+    commandSuggestionMaxChars,
+  );
 
   // Create and setup terminal
   useEffect(() => {

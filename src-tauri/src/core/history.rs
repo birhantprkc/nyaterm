@@ -129,13 +129,18 @@ impl CommandHistoryStore {
             .collect()
     }
 
-    pub fn search(&self, pattern_str: &str, limit: usize) -> Vec<FuzzyResult> {
+    pub fn search(
+        &self,
+        pattern_str: &str,
+        limit: usize,
+        max_command_length: Option<usize>,
+    ) -> Vec<FuzzyResult> {
         let items: Vec<(&str, &str)> = self
             .entries
             .iter()
             .map(|entry| (entry.command.as_str(), entry.command.as_str()))
             .collect();
-        fuzzy_search_items(&items, pattern_str, "history", limit)
+        fuzzy_search_items(&items, pattern_str, "history", limit, max_command_length)
     }
 }
 
@@ -527,7 +532,7 @@ mod tests {
             vec!["docker ps".to_string(), "ls".to_string()]
         );
 
-        let search = store.search("dp", 5);
+        let search = store.search("dp", 5, None);
         assert_eq!(
             search.first().map(|item| item.command.as_str()),
             Some("docker ps")

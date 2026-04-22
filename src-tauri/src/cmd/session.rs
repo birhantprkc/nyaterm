@@ -268,8 +268,11 @@ pub async fn fuzzy_search_history(
     state: tauri::State<'_, Arc<SessionManager>>,
     pattern: String,
     limit: usize,
+    max_command_length: Option<usize>,
 ) -> AppResult<Vec<FuzzyResult>> {
-    Ok(state.fuzzy_search(&pattern, limit).await)
+    Ok(state
+        .fuzzy_search(&pattern, limit, max_command_length)
+        .await)
 }
 
 #[tauri::command]
@@ -284,7 +287,13 @@ pub async fn fuzzy_search_commands(
         .iter()
         .map(|c| (c.label.as_str(), c.command.as_str()))
         .collect();
-    Ok(fuzzy_search_items(&items, &pattern, "quickCommand", limit))
+    Ok(fuzzy_search_items(
+        &items,
+        &pattern,
+        "quickCommand",
+        limit,
+        None,
+    ))
 }
 
 #[tauri::command]

@@ -26,6 +26,7 @@ pub fn fuzzy_search_items(
     pattern_str: &str,
     source: &str,
     limit: usize,
+    max_command_length: Option<usize>,
 ) -> Vec<FuzzyResult> {
     let pattern_str = pattern_str.trim();
     if pattern_str.is_empty() {
@@ -47,7 +48,11 @@ pub fn fuzzy_search_items(
     let mut buf = Vec::new();
 
     let mut scored: Vec<(usize, u32)> = Vec::new();
-    for (idx, (display, _value)) in items.iter().enumerate() {
+    for (idx, (display, value)) in items.iter().enumerate() {
+        if max_command_length.is_some_and(|max| value.chars().count() > max) {
+            continue;
+        }
+
         let haystack = Utf32Str::new(display, &mut buf);
         if let Some(score) = pattern.score(haystack, &mut matcher) {
             scored.push((idx, score));
