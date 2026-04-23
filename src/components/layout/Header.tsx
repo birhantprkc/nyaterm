@@ -8,12 +8,9 @@ import { GrUpgrade } from "react-icons/gr";
 import {
   MdAdd,
   MdArticle,
-  MdCheckBoxOutlineBlank,
-  MdClose,
   MdComputer,
   MdContentCopy,
   MdContentPaste,
-  MdFilterNone,
   MdInfo,
   MdMenu,
   MdMenuBook,
@@ -28,6 +25,7 @@ import {
   MdZoomIn,
   MdZoomOut,
 } from "react-icons/md";
+import { VscChromeMinimize, VscChromeMaximize, VscChromeRestore, VscChromeClose } from "react-icons/vsc";
 import packageJson from "@/../package.json";
 import QuitConfirmDialog from "@/components/dialog/app/QuitConfirmDialog";
 import { Button } from "@/components/ui/button";
@@ -467,42 +465,41 @@ export default function Header({
           <MdViewSidebar className="text-base" />
         </Button>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
-          aria-label={t("menu.minimize")}
-          onClick={handleMinimizeWindow}
-        >
-          <span className="block h-px w-3.5 rounded-full bg-current" />
-        </Button>
+        <div className="flex items-center h-full -mr-2 ml-1">
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-none h-10 w-[46px] px-0 text-[var(--df-text-muted)] transition-colors hover:!bg-[color-mix(in_srgb,var(--df-text)_10%,transparent)] hover:!text-[var(--df-text)]"
+            aria-label={t("menu.minimize")}
+            onClick={handleMinimizeWindow}
+          >
+            <VscChromeMinimize className="text-base" />
+          </Button>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="text-[var(--df-text-muted)] hover:bg-[color-mix(in_srgb,var(--df-text-muted)_10%,transparent)] hover:text-[var(--df-text-muted)]"
-          aria-label={isMaximized ? t("menu.restore") : t("menu.maximize")}
-          onClick={handleToggleMaximizeWindow}
-        >
-          {isMaximized ? (
-            <MdFilterNone className="text-sm" />
-          ) : (
-            <MdCheckBoxOutlineBlank className="text-base" />
-          )}
-        </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-none h-10 w-[46px] px-0 text-[var(--df-text-muted)] transition-colors hover:!bg-[color-mix(in_srgb,var(--df-text)_10%,transparent)] hover:!text-[var(--df-text)]"
+            aria-label={isMaximized ? t("menu.restore") : t("menu.maximize")}
+            onClick={handleToggleMaximizeWindow}
+          >
+            {isMaximized ? (
+              <VscChromeRestore className="text-base" />
+            ) : (
+              <VscChromeMaximize className="text-base" />
+            )}
+          </Button>
 
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="text-[var(--df-text-muted)] hover:bg-red-500/90 hover:text-white"
-          aria-label={t("common.close")}
-          onClick={handleCloseWindow}
-        >
-          <MdClose className="text-base" />
-        </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="rounded-none h-10 w-[46px] px-0 text-[var(--df-text-muted)] transition-colors hover:!bg-[#e81123] hover:!text-white"
+            aria-label={t("common.close")}
+            onClick={handleCloseWindow}
+          >
+            <VscChromeClose className="text-base" />
+          </Button>
+        </div>
       </div>
       <ImportDialog open={showImportDialog} onClose={() => setShowImportDialog(false)} />
       {passwordAlert}
