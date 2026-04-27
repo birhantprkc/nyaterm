@@ -101,6 +101,7 @@ jobs:
             librsvg2-dev \
             patchelf \
             libssl-dev \
+            libudev-dev \
             pkg-config \
             build-essential \
             curl \
