@@ -534,6 +534,8 @@ jobs:
     steps:
       - name: Upload latest.json to updater-beta release
         uses: actions/github-script@v8
+        env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           script: |
             const tag = context.ref.replace('refs/tags/', '');
@@ -551,14 +553,28 @@ jobs:
               return;
             }
 
-            const latestJsonResponse = await fetch(latestJsonAsset.browser_download_url);
+            async function downloadAssetText(asset) {
+              const response = await fetch(asset.url, {
+                headers: {
+                  Accept: 'application/octet-stream',
+                  Authorization: `Bearer ${process.env.GITHUB_TOKEN}`,
+                  'X-GitHub-Api-Version': '2022-11-28',
+                  'User-Agent': 'actions/github-script',
+                },
+                redirect: 'follow',
+              });
 
-            if (!latestJsonResponse.ok) {
-              core.setFailed(`Failed to download latest.json from ${tag}.`);
-              return;
+              if (!response.ok) {
+                const body = await response.text().catch(() => '');
+                throw new Error(
+                  `Failed to download ${asset.name}: HTTP ${response.status} ${response.statusText} ${body.slice(0, 300)}`
+                );
+              }
+
+              return await response.text();
             }
 
-            const content = await latestJsonResponse.text();
+            const content = await downloadAssetText(latestJsonAsset);
 
             let betaRelease;
 
