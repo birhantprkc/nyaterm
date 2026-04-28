@@ -85,6 +85,8 @@ pub struct AiRequestOptions {
     pub language: String,
     #[serde(default = "default_safety_mode")]
     pub safety_mode: String,
+    #[serde(default = "default_history_turns")]
+    pub history_turns: u16,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +121,8 @@ pub struct AiStreamEventPayload {
     pub session_id: Option<String>,
     #[serde(default)]
     pub text_delta: Option<String>,
+    #[serde(default)]
+    pub reasoning_delta: Option<String>,
     #[serde(default)]
     pub message: Option<AiMessage>,
     #[serde(default)]
@@ -175,6 +179,8 @@ pub struct AiMessage {
     pub role: AiMessageRole,
     pub content: String,
     pub created_at: String,
+    #[serde(default)]
+    pub reasoning_content: Option<String>,
     #[serde(default)]
     pub command_cards: Vec<AiCommandCard>,
 }
@@ -241,6 +247,8 @@ struct AiModelOutput {
     #[serde(default)]
     text: String,
     #[serde(default)]
+    reasoning: Option<String>,
+    #[serde(default)]
     command_cards: Vec<AiCommandCard>,
 }
 
@@ -269,6 +277,10 @@ fn default_language() -> String {
 
 fn default_safety_mode() -> String {
     "strict".to_string()
+}
+
+fn default_history_turns() -> u16 {
+    20
 }
 
 fn now_rfc3339() -> String {
@@ -338,6 +350,7 @@ async fn run_chat_stream(
             stream_id: stream_id.clone(),
             session_id: Some(session_id.clone()),
             text_delta: None,
+            reasoning_delta: None,
             message: None,
             command_cards: vec![],
             usage: None,
@@ -366,8 +379,9 @@ async fn run_chat_stream(
     active_streams().lock().unwrap().remove(&stream_id);
 
     match result {
-        Ok(raw_text) => {
-            let (text, mut command_cards) = parse_model_output(&raw_text);
+        Ok(stream_result) => {
+            let (text, reasoning_content, mut command_cards) =
+                parse_model_output(&stream_result.text, stream_result.reasoning_content);
             for card in &mut command_cards {
                 let risk = check_command_risk(CommandRiskRequest {
                     command: card.command.clone(),
@@ -383,6 +397,7 @@ async fn run_chat_stream(
                 role: AiMessageRole::Assistant,
                 content: text,
                 created_at: now_rfc3339(),
+                reasoning_content,
                 command_cards: command_cards.clone(),
             };
 
@@ -398,6 +413,7 @@ async fn run_chat_stream(
                     stream_id: stream_id.clone(),
                     session_id: Some(session_id),
                     text_delta: None,
+                    reasoning_delta: None,
                     message: Some(message),
                     command_cards,
                     usage: None,
@@ -414,6 +430,7 @@ async fn run_chat_stream(
                     stream_id: stream_id.clone(),
                     session_id: Some(session_id),
                     text_delta: None,
+                    reasoning_delta: None,
                     message: None,
                     command_cards: vec![],
                     usage: None,
@@ -424,22 +441,60 @@ async fn run_chat_stream(
     }
 }
 
+#[derive(Debug, Clone)]
+struct AiStreamResult {
+    text: String,
+    reasoning_content: Option<String>,
+}
+
 async fn run_model_stream(
     app: &AppHandle,
     stream_id: &str,
     request: &AiChatRequest,
     settings: &AiSettings,
     cancel_rx: &mut oneshot::Receiver<()>,
-) -> AppResult<String> {
+) -> AppResult<AiStreamResult> {
     let profile = active_profile(settings)?;
     let client = build_client(profile)?;
     let prompt = build_prompt(request, settings);
 
-    let chat_req = ChatRequest::new(vec![
-        ChatMessage::system(SYSTEM_PROMPT),
-        ChatMessage::user(prompt),
-    ]);
-    let chat_options = ChatOptions::default().with_max_tokens(settings.max_output_tokens);
+    let mut messages = vec![ChatMessage::system(SYSTEM_PROMPT)];
+
+    if let Some(session_id) = &request.session_id {
+        let max_turns = request.options.history_turns as usize;
+        if max_turns > 0 {
+            if let Ok(history) = load_history(app) {
+                let history_msgs: Vec<&AiMessage> = history
+                    .messages
+                    .iter()
+                    .filter(|m| m.session_id == *session_id)
+                    .collect();
+                let skip = history_msgs.len().saturating_sub(max_turns);
+                for msg in history_msgs.into_iter().skip(skip) {
+                    match msg.role {
+                        AiMessageRole::User => {
+                            messages.push(ChatMessage::user(&msg.content));
+                        }
+                        AiMessageRole::Assistant => {
+                            let content = extract_text_from_assistant(&msg.content);
+                            if !content.is_empty() {
+                                messages.push(ChatMessage::assistant(&content));
+                            }
+                        }
+                        AiMessageRole::System => {}
+                    }
+                }
+            }
+        }
+    }
+
+    messages.push(ChatMessage::user(prompt));
+
+    let chat_req = ChatRequest::new(messages);
+    let chat_options = ChatOptions::default()
+        .with_max_tokens(settings.max_output_tokens)
+        .with_capture_reasoning_content(true)
+        .with_normalize_reasoning_content(true);
 
     let stream_result = tokio::time::timeout(
         Duration::from_millis(settings.timeout_ms),
@@ -451,6 +506,7 @@ async fn run_model_stream(
 
     let mut stream = stream_result.stream;
     let mut output = String::new();
+    let mut reasoning_output = String::new();
     let timeout = tokio::time::sleep(Duration::from_millis(settings.timeout_ms));
     tokio::pin!(timeout);
 
@@ -473,6 +529,7 @@ async fn run_model_stream(
                                 stream_id: stream_id.to_string(),
                                 session_id: request.session_id.clone(),
                                 text_delta: Some(text_delta),
+                                reasoning_delta: None,
                                 message: None,
                                 command_cards: vec![],
                                 usage: None,
@@ -480,7 +537,32 @@ async fn run_model_stream(
                             });
                         }
                     }
-                    Some(Ok(ChatStreamEvent::End(_))) | None => break,
+                    Some(Ok(ChatStreamEvent::ReasoningChunk(chunk))) => {
+                        let reasoning_delta = chunk.content;
+                        if !reasoning_delta.is_empty() {
+                            reasoning_output.push_str(&reasoning_delta);
+                            emit_stream_event(app, stream_id, AiStreamEventPayload {
+                                event_type: "reasoning_delta".to_string(),
+                                stream_id: stream_id.to_string(),
+                                session_id: request.session_id.clone(),
+                                text_delta: None,
+                                reasoning_delta: Some(reasoning_delta),
+                                message: None,
+                                command_cards: vec![],
+                                usage: None,
+                                error: None,
+                            });
+                        }
+                    }
+                    Some(Ok(ChatStreamEvent::End(end))) => {
+                        if reasoning_output.is_empty() {
+                            if let Some(captured_reasoning_content) = end.captured_reasoning_content {
+                                reasoning_output = captured_reasoning_content;
+                            }
+                        }
+                        break;
+                    }
+                    None => break,
                     Some(Ok(_)) => {}
                     Some(Err(error)) => {
                         return Err(AppError::Config(format!("AI stream failed: {error}")));
@@ -490,7 +572,10 @@ async fn run_model_stream(
         }
     }
 
-    Ok(output)
+    Ok(AiStreamResult {
+        text: output,
+        reasoning_content: trim_string_to_option(reasoning_output),
+    })
 }
 
 fn active_profile(settings: &AiSettings) -> AppResult<&AiProviderProfile> {
@@ -627,7 +712,22 @@ fn build_prompt(request: &AiChatRequest, settings: &AiSettings) -> String {
     )
 }
 
-fn parse_model_output(raw_text: &str) -> (String, Vec<AiCommandCard>) {
+fn extract_text_from_assistant(content: &str) -> String {
+    let trimmed = content.trim();
+    if let Some(json_str) = extract_json_object(trimmed) {
+        if let Ok(output) = serde_json::from_str::<AiModelOutput>(&json_str) {
+            if !output.text.trim().is_empty() {
+                return output.text;
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn parse_model_output(
+    raw_text: &str,
+    stream_reasoning: Option<String>,
+) -> (String, Option<String>, Vec<AiCommandCard>) {
     let candidate = extract_json_object(raw_text).unwrap_or_else(|| raw_text.trim().to_string());
     match serde_json::from_str::<AiModelOutput>(&candidate) {
         Ok(output) => {
@@ -636,9 +736,24 @@ fn parse_model_output(raw_text: &str) -> (String, Vec<AiCommandCard>) {
             } else {
                 output.text
             };
-            (text, output.command_cards)
+            let reasoning_content = trim_optional_to_option(output.reasoning)
+                .or_else(|| trim_optional_to_option(stream_reasoning));
+            let (text, extracted_reasoning) = extract_think_block(&text);
+            (
+                text,
+                extracted_reasoning.or(reasoning_content),
+                output.command_cards,
+            )
         }
-        Err(_) => (raw_text.trim().to_string(), vec![]),
+        Err(_) => {
+            let normalized_reasoning = trim_optional_to_option(stream_reasoning);
+            let (text, extracted_reasoning) = extract_think_block(raw_text);
+            (
+                text,
+                extracted_reasoning.or(normalized_reasoning),
+                vec![],
+            )
+        }
     }
 }
 
@@ -658,6 +773,40 @@ fn extract_json_object(raw_text: &str) -> Option<String> {
         return None;
     }
     Some(trimmed[start..=end].to_string())
+}
+
+fn extract_think_block(raw_text: &str) -> (String, Option<String>) {
+    static THINK_REGEX: OnceLock<Regex> = OnceLock::new();
+    let regex = THINK_REGEX.get_or_init(|| Regex::new(r"(?is)<think>(.*?)</think>").unwrap());
+
+    let mut reasoning_parts = Vec::new();
+    for captures in regex.captures_iter(raw_text) {
+        if let Some(value) = captures.get(1) {
+            let reasoning = value.as_str().trim();
+            if !reasoning.is_empty() {
+                reasoning_parts.push(reasoning.to_string());
+            }
+        }
+    }
+
+    let visible_text = regex.replace_all(raw_text, "").to_string();
+    (
+        visible_text.trim().to_string(),
+        trim_string_to_option(reasoning_parts.join("\n\n")),
+    )
+}
+
+fn trim_string_to_option(value: String) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn trim_optional_to_option(value: Option<String>) -> Option<String> {
+    value.and_then(trim_string_to_option)
 }
 
 fn redact_context(context: &mut AiContext) {
@@ -998,6 +1147,7 @@ fn save_user_message(app: &AppHandle, session_id: &str, request: &AiChatRequest)
         role: AiMessageRole::User,
         content: request.user_input.clone(),
         created_at: now,
+        reasoning_content: None,
         command_cards: vec![],
     });
     save_history(app, &history)
@@ -1138,15 +1288,52 @@ mod tests {
     #[test]
     fn parses_json_command_cards() {
         let raw = r#"{"text":"ok","commandCards":[{"id":"1","title":"CPU","command":"ps aux","explanation":"x","riskLevel":"low","riskReason":"read only","expectedEffect":"list","rollback":"none"}]}"#;
-        let (text, cards) = parse_model_output(raw);
+        let (text, reasoning, cards) = parse_model_output(raw, None);
         assert_eq!(text, "ok");
+        assert_eq!(reasoning, None);
         assert_eq!(cards.len(), 1);
     }
 
     #[test]
     fn parse_failure_returns_text_without_cards() {
-        let (text, cards) = parse_model_output("plain text");
+        let (text, reasoning, cards) = parse_model_output("plain text", None);
         assert_eq!(text, "plain text");
+        assert_eq!(reasoning, None);
         assert!(cards.is_empty());
+    }
+
+    #[test]
+    fn extracts_think_block_into_reasoning() {
+        let (text, reasoning, cards) =
+            parse_model_output("<think>step 1\nstep 2</think>final answer", None);
+        assert_eq!(text, "final answer");
+        assert_eq!(reasoning.as_deref(), Some("step 1\nstep 2"));
+        assert!(cards.is_empty());
+    }
+
+    #[test]
+    fn keeps_markdown_text_when_json_parse_fails() {
+        let markdown = "## Summary\n\n- item 1\n- item 2";
+        let (text, reasoning, cards) = parse_model_output(markdown, None);
+        assert_eq!(text, markdown);
+        assert_eq!(reasoning, None);
+        assert!(cards.is_empty());
+    }
+
+    #[test]
+    fn prefers_json_reasoning_when_present() {
+        let raw = r#"{"text":"answer","reasoning":"first\nsecond","commandCards":[]}"#;
+        let (text, reasoning, cards) = parse_model_output(raw, None);
+        assert_eq!(text, "answer");
+        assert_eq!(reasoning.as_deref(), Some("first\nsecond"));
+        assert!(cards.is_empty());
+    }
+
+    #[test]
+    fn old_history_without_reasoning_defaults_cleanly() {
+        let raw = r#"{"sessions":[],"messages":[{"id":"m1","sessionId":"s1","role":"assistant","content":"hello","createdAt":"2026-04-28T00:00:00Z","commandCards":[]}]}"#;
+        let history: AiHistoryFile = serde_json::from_str(raw).unwrap();
+        assert_eq!(history.messages.len(), 1);
+        assert_eq!(history.messages[0].reasoning_content, None);
     }
 }

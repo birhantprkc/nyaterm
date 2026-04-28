@@ -1,9 +1,12 @@
 import { emit, listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   MdAutoAwesome,
+  MdClose,
   MdContentCopy,
+  MdExpandLess,
+  MdExpandMore,
   MdHistory,
   MdInput,
   MdOutlineSettings,
@@ -12,9 +15,13 @@ import {
   MdSend,
   MdStop,
 } from "react-icons/md";
+import { LuMessageSquarePlus } from "react-icons/lu";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { toast } from "sonner";
 import PanelHeader from "@/components/layout/PanelHeader";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useApp } from "@/context/AppContext";
@@ -24,9 +31,11 @@ import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { buildAIContext, getTerminalContextProvider } from "@/lib/terminalContext";
 import { openSettings } from "@/lib/windowManager";
+import { collectSessionPanes } from "@/lib/workspaceTabs";
 import type {
   AIAction,
   AICommandCard,
+  AIContext,
   AIMessage,
   AISession,
   AIStreamEventPayload,
@@ -74,6 +83,7 @@ function createLocalMessage(role: "user" | "assistant", content: string, session
     role,
     content,
     createdAt: new Date().toISOString(),
+    reasoningContent: null,
     commandCards: [],
   } satisfies AIMessage;
 }
@@ -100,6 +110,155 @@ function mapRiskColor(riskLevel: RiskLevel) {
     case "low":
       return "green";
   }
+}
+
+type MarkdownNodeProps = {
+  children?: ReactNode;
+  href?: string;
+};
+
+function looksLikeStructuredJsonOutput(content: string) {
+  const trimmed = content.trimStart();
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("```json") ||
+    trimmed.startsWith("```") ||
+    (trimmed.includes('"text"') && trimmed.includes('"commandCards"'))
+  );
+}
+
+function AnimatedStatusText({ label }: { label: string }) {
+  return <span className="df-thinking-text font-medium">{label}</span>;
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <div className="break-words text-xs leading-5">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }: MarkdownNodeProps) => (
+            <p className="my-2 first:mt-0 last:mb-0">{children}</p>
+          ),
+          ul: ({ children }: MarkdownNodeProps) => (
+            <ul className="my-2 list-disc pl-5">{children}</ul>
+          ),
+          ol: ({ children }: MarkdownNodeProps) => (
+            <ol className="my-2 list-decimal pl-5">{children}</ol>
+          ),
+          li: ({ children }: MarkdownNodeProps) => <li className="my-0.5">{children}</li>,
+          a: ({ children, href }: MarkdownNodeProps) => (
+            <a
+              className="text-primary underline underline-offset-2"
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {children}
+            </a>
+          ),
+          blockquote: ({ children }: MarkdownNodeProps) => (
+            <blockquote className="my-2 border-l-2 border-border pl-3 text-muted-foreground">
+              {children}
+            </blockquote>
+          ),
+          pre: ({ children }: MarkdownNodeProps) => (
+            <pre className="terminal-scroll my-2 max-h-64 overflow-auto rounded-md border border-border/60 bg-muted/30 p-3 font-mono text-[0.6875rem] leading-5">
+              {children}
+            </pre>
+          ),
+          code: ({ children }: MarkdownNodeProps) => (
+            <code className="rounded bg-muted/40 px-1 py-0.5 font-mono text-[0.6875rem]">
+              {children}
+            </code>
+          ),
+          table: ({ children }: MarkdownNodeProps) => (
+            <div className="terminal-scroll my-2 overflow-auto">
+              <table className="w-full border-collapse text-left">{children}</table>
+            </div>
+          ),
+          th: ({ children }: MarkdownNodeProps) => (
+            <th className="border border-border/60 px-2 py-1 font-medium">{children}</th>
+          ),
+          td: ({ children }: MarkdownNodeProps) => (
+            <td className="border border-border/60 px-2 py-1">{children}</td>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function AssistantReasoning({ message, loading }: { message: AIMessage; loading: boolean }) {
+  const { t } = useTranslation();
+  const reasoningContent = message.reasoningContent?.trim();
+  const [open, setOpen] = useState(false);
+
+  if (!reasoningContent) {
+    return loading ? (
+      <div className="mt-3 overflow-hidden rounded-md border border-primary/25 bg-primary/8 shadow-sm">
+        <div className="px-3 py-2.5 text-[0.6875rem]">
+          <AnimatedStatusText label={t("ai.thinking")} />
+        </div>
+        <div className="h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent animate-pulse" />
+      </div>
+    ) : null;
+  }
+
+  return (
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      className={`mt-3 rounded-md border bg-background/40 ${
+        loading ? "border-primary/25 bg-primary/6 shadow-sm" : "border-border/60"
+      }`}
+    >
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className={`flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-[0.6875rem] font-medium transition hover:text-foreground ${
+            loading ? "text-primary" : "text-muted-foreground"
+          }`}
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            {loading ? (
+              <AnimatedStatusText label={t("ai.thinking")} />
+            ) : (
+              <span>{t("ai.reasoning")}</span>
+            )}
+          </span>
+          <span className="flex items-center gap-1">
+            {open ? t("ai.collapseReasoning") : t("ai.expandReasoning")}
+            {open ? <MdExpandLess className="text-sm" /> : <MdExpandMore className="text-sm" />}
+          </span>
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="border-t border-border/60 px-3 py-3">
+          <MarkdownContent content={reasoningContent} />
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function AssistantResponse({ message, loading }: { message: AIMessage; loading: boolean }) {
+  const { t } = useTranslation();
+
+  if (loading && looksLikeStructuredJsonOutput(message.content)) {
+    return (
+      <div className="mt-3 overflow-hidden rounded-md border border-primary/20 bg-primary/6 shadow-sm">
+        <div className="px-3 py-2.5 text-[0.6875rem]">
+          <AnimatedStatusText label={t("ai.formattingResponse")} />
+        </div>
+        <div className="h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent animate-pulse" />
+      </div>
+    );
+  }
+
+  return <MarkdownContent content={message.content} />;
 }
 
 function AICommandCardView({
@@ -159,7 +318,7 @@ function AICommandCardView({
 
 function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantPanelProps) {
   const { t } = useTranslation();
-  const { appSettings } = useApp();
+  const { appSettings, tabs, savedConnections } = useApp();
   const aiSettings = appSettings.ai;
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<AIMessage[]>([]);
@@ -169,11 +328,21 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   const [loading, setLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(null);
+  const [streamingAssistantId, setStreamingAssistantId] = useState<string | null>(null);
   const [detectedError, setDetectedError] = useState<AIErrorDetectedDetail | null>(null);
+  const [targetPanes, setTargetPanes] = useState<SessionPane[]>([]);
+  const [showMentionPopover, setShowMentionPopover] = useState(false);
+  const [mentionQuery, setMentionQuery] = useState("");
+  const [mentionIndex, setMentionIndex] = useState(0);
   const handledIntentIdRef = useRef<string | null>(null);
   const historyButtonRef = useRef<HTMLButtonElement | null>(null);
   const historyCardRef = useRef<HTMLDivElement | null>(null);
+  const mentionPopoverRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const streamUnlistenRef = useRef<UnlistenFn | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const shouldAutoScrollRef = useRef(true);
+  const cancelledRef = useRef(false);
 
   const activeProfile = useMemo(
     () =>
@@ -181,6 +350,36 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       aiSettings.provider_profiles.find((profile) => profile.enabled),
     [aiSettings.active_profile_id, aiSettings.provider_profiles],
   );
+
+  const allSessionPanes = useMemo(() => {
+    const panes: SessionPane[] = [];
+    for (const tab of tabs) {
+      for (const pane of collectSessionPanes(tab.root)) {
+        if (!pane.connecting && !pane.connectError) {
+          panes.push(pane);
+        }
+      }
+    }
+    return panes;
+  }, [tabs]);
+
+  const filteredMentionPanes = useMemo(() => {
+    const q = mentionQuery.toLowerCase();
+    if (!q) return allSessionPanes;
+    return allSessionPanes.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.sessionId.toLowerCase().includes(q) ||
+        p.type.toLowerCase().includes(q),
+    );
+  }, [allSessionPanes, mentionQuery]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [filteredMentionPanes]);
+
+  const effectivePanes = targetPanes.length > 0 ? targetPanes : activePane ? [activePane] : [];
+  const effectiveSessionId = effectivePanes[0]?.sessionId ?? null;
 
   const activeSessionId = activePane?.sessionId ?? null;
   const filteredSessions = useMemo(() => {
@@ -201,14 +400,30 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
   }, []);
 
   useEffect(() => {
+    const watchedIds = new Set(effectivePanes.map((p) => p.sessionId));
+    if (activeSessionId) watchedIds.add(activeSessionId);
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<AIErrorDetectedDetail>).detail;
-      if (!detail || detail.sessionId !== activeSessionId) return;
+      if (!detail || !watchedIds.has(detail.sessionId)) return;
       setDetectedError(detail);
     };
     window.addEventListener(AI_ERROR_DETECTED_EVENT, handler);
     return () => window.removeEventListener(AI_ERROR_DETECTED_EVENT, handler);
-  }, [activeSessionId]);
+  }, [activeSessionId, effectivePanes]);
+
+  const handleMessagesScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    shouldAutoScrollRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  }, []);
+
+  useEffect(() => {
+    if (!shouldAutoScrollRef.current) return;
+    requestAnimationFrame(() => {
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    });
+  }, [messages]);
 
   const loadSessions = useCallback(async () => {
     try {
@@ -258,9 +473,71 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     [activeConnection?.id],
   );
 
+  const buildMergedContext = useCallback(
+    async (panes: SessionPane[], selectedText?: string): Promise<AIContext> => {
+      if (panes.length === 0) {
+        return buildAIContext({
+          pane: null,
+          connection: null,
+          lineLimit: aiSettings.context_line_limit,
+          selectedText,
+        });
+      }
+      if (panes.length === 1) {
+        const conn = panes[0].connectionId
+          ? (savedConnections.find((c) => c.id === panes[0].connectionId) ?? null)
+          : activeConnection;
+        return buildAIContext({
+          pane: panes[0],
+          connection: conn,
+          lineLimit: aiSettings.context_line_limit,
+          selectedText,
+        });
+      }
+      const contexts = await Promise.all(
+        panes.map((p) => {
+          const conn = p.connectionId
+            ? (savedConnections.find((c) => c.id === p.connectionId) ?? null)
+            : null;
+          return buildAIContext({
+            pane: p,
+            connection: conn,
+            lineLimit: Math.floor(aiSettings.context_line_limit / panes.length),
+          });
+        }),
+      );
+      const merged: AIContext = {
+        connectionName: contexts.map((c) => c.connectionName ?? "-").join(", "),
+        host: contexts.map((c) => c.host ?? "-").join(", "),
+        port: contexts[0]?.port ?? null,
+        username: contexts.map((c) => c.username ?? "-").join(", "),
+        cwd: contexts.map((c) => c.cwd ?? "-").join(", "),
+        os: contexts[0]?.os ?? null,
+        arch: contexts[0]?.arch ?? null,
+        recentOutput: contexts
+          .map((c, i) => `[${panes[i].name}]\n${c.recentOutput}`)
+          .filter((s) => s.trim().length > panes[0].name.length + 4)
+          .join("\n---\n"),
+        selectedText:
+          selectedText ??
+          contexts
+            .map((c) => c.selectedText)
+            .filter(Boolean)
+            .join("\n"),
+        inputBuffer: contexts
+          .map((c) => c.inputBuffer)
+          .filter(Boolean)
+          .join("\n"),
+      };
+      return merged;
+    },
+    [activeConnection, aiSettings.context_line_limit, savedConnections],
+  );
+
   const startChat = useCallback(
     async (action: AIAction, userInput: string, selectedText?: string) => {
-      if (!activePane || activePane.connecting || activePane.connectError) {
+      const panes = effectivePanes;
+      if (panes.length === 0) {
         toast.error(t("panel.noActiveSessions"));
         return;
       }
@@ -271,6 +548,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
 
       setDetectedError(null);
       setLoading(true);
+      cancelledRef.current = false;
       streamUnlistenRef.current?.();
       streamUnlistenRef.current = null;
 
@@ -285,22 +563,22 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
           role: "assistant",
           content: "",
           createdAt: new Date().toISOString(),
+          reasoningContent: null,
           commandCards: [],
         },
       ]);
+      setStreamingAssistantId(assistantId);
 
       try {
-        const context = await buildAIContext({
-          pane: activePane,
-          connection: activeConnection,
-          lineLimit: aiSettings.context_line_limit,
-          selectedText,
-        });
+        const context = await buildMergedContext(panes, selectedText);
+        const primaryConn = panes[0].connectionId
+          ? (savedConnections.find((c) => c.id === panes[0].connectionId) ?? null)
+          : activeConnection;
 
         const result = await invoke<AIStreamStart>("start_ai_chat_stream", {
           request: {
             sessionId: currentSessionId,
-            connectionId: activeConnection?.id ?? null,
+            connectionId: primaryConn?.id ?? null,
             action,
             userInput,
             context,
@@ -329,9 +607,24 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
               return;
             }
 
+            if (payload.type === "reasoning_delta" && payload.reasoningDelta) {
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === assistantId
+                    ? {
+                        ...message,
+                        reasoningContent: `${message.reasoningContent ?? ""}${payload.reasoningDelta}`,
+                      }
+                    : message,
+                ),
+              );
+              return;
+            }
+
             if (payload.type === "done") {
               setLoading(false);
               setStreamId(null);
+              setStreamingAssistantId(null);
               setMessages((prev) =>
                 prev.map((message) =>
                   message.id === assistantId && payload.message ? payload.message : message,
@@ -342,19 +635,23 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             }
 
             if (payload.type === "error") {
+              const wasCancelled = cancelledRef.current;
               setLoading(false);
               setStreamId(null);
-              setMessages((prev) =>
-                prev.map((message) =>
-                  message.id === assistantId
-                    ? {
-                        ...message,
-                        content: payload.error ?? t("ai.requestFailed"),
-                      }
-                    : message,
-                ),
-              );
-              toast.error(payload.error ?? t("ai.requestFailed"));
+              setStreamingAssistantId(null);
+              if (!wasCancelled) {
+                setMessages((prev) =>
+                  prev.map((message) =>
+                    message.id === assistantId
+                      ? {
+                          ...message,
+                          content: payload.error ?? t("ai.requestFailed"),
+                        }
+                      : message,
+                  ),
+                );
+                toast.error(payload.error ?? t("ai.requestFailed"));
+              }
             }
           },
         );
@@ -363,22 +660,28 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       } catch (error) {
         setLoading(false);
         setStreamId(null);
-        setMessages((prev) =>
-          prev.map((message) =>
-            message.id === assistantId ? { ...message, content: getErrorMessage(error) } : message,
-          ),
-        );
-        toast.error(getErrorMessage(error));
+        setStreamingAssistantId(null);
+        if (!cancelledRef.current) {
+          setMessages((prev) =>
+            prev.map((message) =>
+              message.id === assistantId
+                ? { ...message, content: getErrorMessage(error) }
+                : message,
+            ),
+          );
+          toast.error(getErrorMessage(error));
+        }
       }
     },
     [
       activeConnection,
-      activePane,
-      aiSettings.context_line_limit,
       aiSettings.enabled,
       appendAudit,
+      buildMergedContext,
       currentSessionId,
+      effectivePanes,
       loadSessions,
+      savedConnections,
       t,
     ],
   );
@@ -394,19 +697,23 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     const value = input.trim();
     if (!value || loading) return;
     setInput("");
+    shouldAutoScrollRef.current = true;
     void startChat("generate_command", value);
   }, [input, loading, startChat]);
 
   const cancelStream = useCallback(() => {
     if (!streamId) return;
+    cancelledRef.current = true;
     void invoke("cancel_ai_chat_stream", { streamId }).catch(() => {});
     setLoading(false);
     setStreamId(null);
+    setStreamingAssistantId(null);
   }, [streamId]);
 
   const insertCommand = useCallback(
     (card: AICommandCard) => {
-      const provider = getTerminalContextProvider(activeSessionId);
+      const insertSessionId = effectiveSessionId ?? activeSessionId;
+      const provider = getTerminalContextProvider(insertSessionId);
       if (!provider) {
         toast.error(t("ai.noTerminal"));
         return;
@@ -424,7 +731,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         })
         .catch((error) => toast.error(getErrorMessage(error)));
     },
-    [activeSessionId, appendAudit, t],
+    [activeSessionId, appendAudit, effectiveSessionId, t],
   );
 
   const saveQuickCommand = useCallback(
@@ -478,20 +785,77 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     await loadSessions();
   }, [loadSessions]);
 
+  const newChat = useCallback(() => {
+    if (loading) return;
+    setMessages([]);
+    setCurrentSessionId(null);
+    setInput("");
+    setDetectedError(null);
+    setTargetPanes([]);
+    setShowMentionPopover(false);
+    shouldAutoScrollRef.current = true;
+  }, [loading]);
+
+  const handleInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.target.value;
+      setInput(value);
+
+      const cursorPos = event.target.selectionStart;
+      const textBeforeCursor = value.slice(0, cursorPos);
+      const atMatch = textBeforeCursor.match(/@(\S*)$/);
+      if (atMatch) {
+        setMentionQuery(atMatch[1]);
+        if (!showMentionPopover) setMentionIndex(0);
+        setShowMentionPopover(true);
+      } else {
+        setShowMentionPopover(false);
+        setMentionQuery("");
+      }
+    },
+    [showMentionPopover],
+  );
+
+  const selectMentionPane = useCallback(
+    (pane: SessionPane) => {
+      setTargetPanes((prev) => {
+        const exists = prev.some((p) => p.sessionId === pane.sessionId);
+        return exists ? prev.filter((p) => p.sessionId !== pane.sessionId) : [...prev, pane];
+      });
+
+      const cursorPos = textareaRef.current?.selectionStart ?? input.length;
+      const textBeforeCursor = input.slice(0, cursorPos);
+      const textAfterCursor = input.slice(cursorPos);
+      const cleaned = textBeforeCursor.replace(/@\S*$/, "");
+      setInput(`${cleaned}${textAfterCursor}`);
+      setShowMentionPopover(false);
+      setMentionQuery("");
+      textareaRef.current?.focus();
+    },
+    [input],
+  );
+
+  const removeTargetPane = useCallback((sessionId: string) => {
+    setTargetPanes((prev) => prev.filter((p) => p.sessionId !== sessionId));
+  }, []);
+
   return (
     <div
       className="relative flex h-full flex-col"
       style={{ backgroundColor: "var(--df-bg-panel)" }}
       onPointerDownCapture={(event) => {
-        if (!showHistory) return;
         const target = event.target as Node;
-        if (
-          historyCardRef.current?.contains(target) ||
-          historyButtonRef.current?.contains(target)
-        ) {
-          return;
+        if (showHistory) {
+          if (
+            !historyCardRef.current?.contains(target) &&
+            !historyButtonRef.current?.contains(target)
+          ) {
+            setShowHistory(false);
+          }
         }
-        setShowHistory(false);
+        if (showMentionPopover && !mentionPopoverRef.current?.contains(target)) {
+          setShowMentionPopover(false);
+        }
       }}
     >
       <PanelHeader
@@ -516,6 +880,15 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
               title={t("ai.settings")}
             >
               <MdOutlineSettings />
+            </Button>
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={newChat}
+              disabled={loading}
+              title={t("ai.newChat")}
+            >
+              <LuMessageSquarePlus />
             </Button>
           </>
         }
@@ -598,7 +971,11 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
         </div>
       ) : null}
 
-      <div className="flex-1 overflow-auto p-3 terminal-scroll">
+      <div
+        ref={scrollContainerRef}
+        onScroll={handleMessagesScroll}
+        className="flex-1 overflow-auto p-3 terminal-scroll"
+      >
         {messages.length === 0 ? (
           <div className="flex h-full min-h-[12rem] flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
             <MdAutoAwesome className="text-3xl" />
@@ -618,7 +995,20 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
                 <div className="mb-2 text-[0.6875rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
                   {message.role === "user" ? "User" : "AI"}
                 </div>
-                <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                {message.role === "assistant" ? (
+                  <AssistantReasoning
+                    message={message}
+                    loading={loading && streamingAssistantId === message.id}
+                  />
+                ) : null}
+                {message.role === "assistant" ? (
+                  <AssistantResponse
+                    message={message}
+                    loading={loading && streamingAssistantId === message.id}
+                  />
+                ) : (
+                  <div className="whitespace-pre-wrap break-words">{message.content}</div>
+                )}
                 {message.commandCards?.length ? (
                   <div className="mt-3 space-y-2">
                     {message.commandCards.map((card) => (
@@ -638,29 +1028,124 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
       </div>
 
       <div className="shrink-0 border-t border-border/70 p-2">
-        <div className="flex gap-2">
-          <Textarea
-            value={input}
-            disabled={loading}
-            placeholder={t("ai.placeholder")}
-            className="max-h-32 min-h-16 resize-none overflow-y-auto text-xs terminal-scroll"
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-          />
-          {loading ? (
-            <Button size="icon-sm" variant="outline" onClick={cancelStream}>
-              <MdStop />
-            </Button>
-          ) : (
-            <Button size="icon-sm" onClick={submit} disabled={!input.trim()}>
-              <MdSend />
-            </Button>
-          )}
+        {targetPanes.length > 0 ? (
+          <div className="mb-1.5 flex flex-wrap items-center gap-1">
+            <span className="text-[0.625rem] font-medium text-muted-foreground">
+              {t("ai.targetSession")}:
+            </span>
+            {targetPanes.map((p) => (
+              <span
+                key={p.sessionId}
+                className="inline-flex items-center gap-0.5 rounded-full border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[0.625rem] font-medium text-primary"
+              >
+                {p.name}
+                <button
+                  type="button"
+                  className="ml-0.5 rounded-full p-0 hover:text-destructive"
+                  onClick={() => removeTargetPane(p.sessionId)}
+                >
+                  <MdClose className="text-[0.625rem]" />
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        <div className="relative">
+          {showMentionPopover ? (
+            <div
+              ref={mentionPopoverRef}
+              className="absolute bottom-full left-0 right-0 z-30 mb-1 flex max-h-48 flex-col overflow-hidden rounded-md border bg-popover text-popover-foreground shadow-lg"
+              style={{ borderColor: "var(--df-border)" }}
+            >
+              <div className="min-h-0 overflow-auto p-1 terminal-scroll">
+                {filteredMentionPanes.length === 0 ? (
+                  <div className="px-2 py-3 text-center text-xs text-muted-foreground">
+                    {t("ai.noSessions")}
+                  </div>
+                ) : (
+                  filteredMentionPanes.map((pane, idx) => {
+                    const isSelected = targetPanes.some((p) => p.sessionId === pane.sessionId);
+                    const isFocused = idx === mentionIndex;
+                    return (
+                      <button
+                        key={pane.sessionId}
+                        ref={(el) => {
+                          if (isFocused && el) el.scrollIntoView({ block: "nearest" });
+                        }}
+                        type="button"
+                        className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-muted/60 ${isFocused ? "bg-accent" : ""} ${isSelected ? "bg-primary/10" : ""}`}
+                        onClick={() => selectMentionPane(pane)}
+                        onPointerEnter={() => setMentionIndex(idx)}
+                      >
+                        <span
+                          className={`size-2 shrink-0 rounded-full ${isSelected ? "bg-primary" : "bg-muted-foreground/40"}`}
+                        />
+                        <span className="min-w-0 truncate font-medium">{pane.name}</span>
+                        <span className="ml-auto shrink-0 text-[0.625rem] text-muted-foreground">
+                          {pane.type}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          ) : null}
+          <div className="flex gap-2">
+            <Textarea
+              ref={textareaRef}
+              value={input}
+              disabled={loading}
+              placeholder={t("ai.placeholder")}
+              className="max-h-32 min-h-16 resize-none overflow-y-auto text-xs terminal-scroll"
+              onChange={handleInputChange}
+              onKeyDown={(event) => {
+                if (showMentionPopover) {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    setShowMentionPopover(false);
+                    return;
+                  }
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    setMentionIndex((i) =>
+                      filteredMentionPanes.length === 0 ? 0 : (i + 1) % filteredMentionPanes.length,
+                    );
+                    return;
+                  }
+                  if (event.key === "ArrowUp") {
+                    event.preventDefault();
+                    setMentionIndex((i) =>
+                      filteredMentionPanes.length === 0
+                        ? 0
+                        : (i - 1 + filteredMentionPanes.length) % filteredMentionPanes.length,
+                    );
+                    return;
+                  }
+                  if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                    event.preventDefault();
+                    const target = filteredMentionPanes[mentionIndex];
+                    if (target) selectMentionPane(target);
+                    else setShowMentionPopover(false);
+                    return;
+                  }
+                }
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  submit();
+                }
+              }}
+            />
+            {loading ? (
+              <Button size="icon-sm" variant="outline" onClick={cancelStream}>
+                <MdStop />
+              </Button>
+            ) : (
+              <Button size="icon-sm" onClick={submit} disabled={!input.trim()}>
+                <MdSend />
+              </Button>
+            )}
+          </div>
         </div>
       </div>
     </div>

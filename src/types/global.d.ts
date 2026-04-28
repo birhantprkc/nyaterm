@@ -547,6 +547,7 @@ export interface AIMessage {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt: string;
+  reasoningContent?: string | null;
   commandCards?: AICommandCard[];
 }
 
@@ -564,10 +565,11 @@ export interface AIStreamStart {
 }
 
 export interface AIStreamEventPayload {
-  type: "start" | "delta" | "done" | "error";
+  type: "start" | "delta" | "reasoning_delta" | "done" | "error";
   streamId: string;
   sessionId?: string;
   textDelta?: string;
+  reasoningDelta?: string;
   message?: AIMessage;
   commandCards?: AICommandCard[];
   usage?: unknown;
