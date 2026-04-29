@@ -166,19 +166,12 @@ Dragonfly 的终端工作区有两个容易混淆、但职责不同的层次：
 
 ## 配置与持久化
 
-应用配置保存在 `~/.dragonfly/` 下，典型文件包括：
+应用配置保存在 `~/.dragonfly/dragonfly.redb` 中。主要 redb 文档包括：
 
-- `settings.json`
-- `sessions.json`
-- `keys.json`
-- `passwords.json`
-- `otp.json`
-- `quick-command.json`
-- `tunnels.json`
-- `proxies.json`
-- `history.json`
-- `known_hosts`
-- `cloud_sync_state.json`
+- JSON 文档：`settings`、`sessions`、`keys`、`passwords`、`otp`、`quick-command`、`tunnels`、`proxies`、`history`、`cloud-sync-state`
+- 文本文档：`known_hosts`、`master.key`
+
+旧版 `.dragonfly` JSON / 文本文件会在首次启动时迁入 redb，并保留在目录中作为人工回退备份。
 
 其中敏感值会先加密再写盘，因此前端管理的是可复用凭据条目，而不是明文配置。
 

@@ -166,19 +166,12 @@ Core backend capabilities are mainly organized under these modules:
 
 ## Configuration and persistence
 
-Application data is stored under `~/.dragonfly/`. Typical files include:
+Application data is stored in `~/.dragonfly/dragonfly.redb`. Primary redb documents include:
 
-- `settings.json`
-- `sessions.json`
-- `keys.json`
-- `passwords.json`
-- `otp.json`
-- `quick-command.json`
-- `tunnels.json`
-- `proxies.json`
-- `history.json`
-- `known_hosts`
-- `cloud_sync_state.json`
+- JSON documents: `settings`, `sessions`, `keys`, `passwords`, `otp`, `quick-command`, `tunnels`, `proxies`, `history`, `cloud-sync-state`
+- Text documents: `known_hosts`, `master.key`
+
+Legacy `.dragonfly` JSON / text files are imported into redb on first launch and kept in place as manual fallback backups.
 
 Sensitive values are encrypted before being written, so the app manages reusable credential records rather than plain-text secrets.
 

@@ -92,6 +92,7 @@ If you want to add screenshots later, these are the recommended stable asset pat
 | Terminal | xterm.js |
 | SSH | russh |
 | File transfer | russh-sftp |
+| Local persistence | redb |
 | Storage abstraction | OpenDAL |
 
 ## Getting started

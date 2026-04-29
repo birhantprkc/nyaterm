@@ -127,7 +127,7 @@ When SSH first connects to an unknown host, Dragonfly supports three policies:
 | Accept | Automatically accept new host keys |
 | Strict | Reject all unknown host keys |
 
-Known host records are stored in `~/.dragonfly/known_hosts`.
+Known host records are stored in local storage at `~/.dragonfly/dragonfly.redb`; legacy `known_hosts` is imported on first launch.
 
 If host identity validation matters in your environment, prefer **Prompt** or **Strict** over unconditional acceptance.
 

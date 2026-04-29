@@ -165,28 +165,19 @@ In the current implementation, portable snapshots cover connections, credential 
 
 ## Configuration and encryption
 
-Configuration files are stored under `~/.dragonfly/` and are mainly managed by `src-tauri/src/config/`.
+Configuration and records are stored in `~/.dragonfly/dragonfly.redb` and are mainly managed by `src-tauri/src/storage.rs` and `src-tauri/src/config/`. On first launch, legacy `.dragonfly` JSON / text files are imported into redb, but old files are not dual-written afterward.
 
-Common files include:
+Primary redb documents include:
 
-- `settings.json`
-- `sessions.json`
-- `keys.json`
-- `passwords.json`
-- `otp.json`
-- `quick-command.json`
-- `tunnels.json`
-- `proxies.json`
-- `history.json`
-- `known_hosts`
-- `cloud_sync_state.json`
+- JSON documents: `settings`, `sessions`, `keys`, `passwords`, `otp`, `quick-command`, `tunnels`, `proxies`, `history`, `cloud-sync-state`
+- Text documents: `known_hosts`, `master.key`
 
 Sensitive fields are encrypted before being written, so when adding new configuration you should verify whether it crosses a sensitive-data boundary.
 
 For cloud sync specifically, also pay attention to:
 
 - provider credential fields going through encrypt / mask / merge handling
-- runtime state being stored separately in `cloud_sync_state.json`
+- runtime state being stored separately in the `cloud-sync-state` document
 - history mainly being reconstructed from structured logs and then exposed through `list_cloud_sync_history`
 
 ## Event model

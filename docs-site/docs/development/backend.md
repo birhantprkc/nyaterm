@@ -180,28 +180,19 @@ src-tauri/src/cmd/
 
 ## 配置与加密
 
-配置文件保存在 `~/.dragonfly/`，主要由 `src-tauri/src/config/` 管理。
+配置和记录保存在 `~/.dragonfly/dragonfly.redb`，主要由 `src-tauri/src/storage.rs` 和 `src-tauri/src/config/` 管理。首次启动时会把旧版 `.dragonfly` JSON / 文本文件迁入 redb，但不会继续双写旧文件。
 
-常见文件包括：
+主要 redb 文档包括：
 
-- `settings.json`
-- `sessions.json`
-- `keys.json`
-- `passwords.json`
-- `otp.json`
-- `quick-command.json`
-- `tunnels.json`
-- `proxies.json`
-- `history.json`
-- `known_hosts`
-- `cloud_sync_state.json`
+- JSON 文档：`settings`、`sessions`、`keys`、`passwords`、`otp`、`quick-command`、`tunnels`、`proxies`、`history`、`cloud-sync-state`
+- 文本文档：`known_hosts`、`master.key`
 
 敏感字段会在写盘前加密，因此新增配置时要确认是否属于敏感数据边界。
 
 对于 cloud sync，还要额外关注：
 
 - provider 配置中的凭据字段会经过加密 / mask / merge 处理
-- 运行时状态单独落在 `cloud_sync_state.json`
+- 运行时状态单独落在 `cloud-sync-state` 文档
 - 历史记录主要来自结构化日志，再被 `list_cloud_sync_history` 聚合读取
 
 ## 事件模型

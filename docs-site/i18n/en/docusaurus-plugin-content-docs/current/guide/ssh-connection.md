@@ -139,7 +139,7 @@ Dragonfly maintains known-host records and offers three SSH host key policies:
 | Accept | Automatically accept and record new host keys |
 | Strict | Reject all unknown host keys |
 
-Known host records are stored in `~/.dragonfly/known_hosts`.
+Known host records are stored in local storage at `~/.dragonfly/dragonfly.redb`; legacy `known_hosts` is imported on first launch.
 
 If you operate in a stricter environment, verify the host key source before accepting it.
 

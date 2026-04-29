@@ -125,4 +125,4 @@ After import, it is a good idea to review the username, port, authentication met
 
 ### Where are Dragonfly’s config files stored?
 
-Application configuration is stored under `~/.dragonfly/`, including settings, connections, keys, OTP data, tunnels, proxies, and history.
+Application configuration is stored in `~/.dragonfly/dragonfly.redb`, including settings, connections, keys, OTP data, tunnels, proxies, and history. Legacy JSON / text files are imported on first launch and left in place as manual fallback backups.
