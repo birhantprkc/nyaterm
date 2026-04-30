@@ -81,6 +81,7 @@ encoding_rs = "0.8"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "gif", "webp"] }
 rqrr = "0.9"
 serialport = "4"
+strip-ansi-escapes = "0.2"
 arboard = "3"
 opendal = { version = "0.55", features = [
     "services-s3",
