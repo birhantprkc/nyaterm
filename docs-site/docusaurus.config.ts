@@ -53,6 +53,27 @@ const config: Config = {
     ],
   ],
 
+  plugins: [
+    [
+      "@dipakparmar/docusaurus-plugin-umami",
+      /** @type {import('@dipakparmar/docusaurus-plugin-umami').Options} */
+      ({
+        websiteID: "ba8f55f2-ab09-4cf8-9266-645c4304d58f", // Required
+        analyticsDomain: "umami.coderkang.top", // Required
+        scriptName: "script.js", // Optional, defaults to script.js
+        dataHostURL: "", // Optional
+        dataAutoTrack: true, // Optional, defaults to true
+        dataDoNotTrack: false, // Optional, defaults to false
+        dataCache: false, // Optional, defaults to false
+        dataDomains: "", // Optional, comma separated list of domains, *Recommended*
+        dataExcludeSearch: false, // Optional, defaults to false
+        dataExcludeHash: false, // Optional, defaults to false
+        dataTag: "", // Optional
+        dataBeforeSend: "beforeSendHandler", // Optional
+      }),
+    ],
+  ],
+
   themeConfig: {
     colorMode: {
       defaultMode: 'dark',
