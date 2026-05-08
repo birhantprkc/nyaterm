@@ -86,13 +86,6 @@ import type {
 } from "@/types/global";
 import { FileListItem } from "./FileListItem";
 
-interface TransferEventPayload {
-  session_id: string;
-  direction: string;
-  status: string;
-  remote_path?: string;
-}
-
 interface ResolvedLocalDropPathEntry {
   path: string;
   isDir: boolean;
@@ -214,12 +207,6 @@ async function collectExternalDropAdditionalObjects(dataTransfer: DataTransfer |
   }
 
   return additionalObjects;
-}
-
-function getParentPath(path: string) {
-  const normalized = path !== "/" && path.endsWith("/") ? path.slice(0, -1) : path;
-  const index = normalized.lastIndexOf("/");
-  return index <= 0 ? "/" : normalized.slice(0, index);
 }
 
 function normalizeDirectoryPath(path: string) {
@@ -349,6 +336,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
   const [cwdTrackingActive, setCwdTrackingActive] = useState(false);
   const alwaysUploadFilesRef = useRef<Set<string>>(new Set());
   const filesRef = useRef<FileEntry[]>([]);
+  const activeSessionIdRef = useRef<string | null>(null);
   const currentPathRef = useRef("");
   const homeDirRef = useRef("");
   const listContainerRef = useRef<HTMLDivElement | null>(null);
@@ -363,12 +351,12 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
 
   const sessionCacheRef = useRef(fileExplorerSessionCacheStore);
   const prevSessionIdRef = useRef<string | null>(null);
-  const pendingManualRefreshUploadsRef = useRef<Set<string>>(new Set());
   const [isExternalDropActive, setIsExternalDropActive] = useState(false);
   const [listScrollTop, setListScrollTop] = useState(0);
   const [listViewportHeight, setListViewportHeight] = useState(0);
 
   filesRef.current = files;
+  activeSessionIdRef.current = activeSessionId;
   currentPathRef.current = currentPath;
   homeDirRef.current = homeDir;
 
@@ -671,15 +659,14 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
 
         const fileName = getLocalPathName(entry.path, "uploaded_file");
         const remotePath = buildRemoteUploadPath(target.remoteDir, fileName);
-        const uploadKey = `${target.sessionId}:${remotePath}`;
 
-        pendingManualRefreshUploadsRef.current.add(uploadKey);
         try {
           await invoke("upload_local_file", {
             sessionId: target.sessionId,
             localPath: entry.path,
             remotePath,
           });
+          refreshAfterUpload = true;
         } catch (error) {
           logger.error({
             domain: "transfer.lifecycle",
@@ -692,19 +679,18 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
             },
             error,
           });
-          pendingManualRefreshUploadsRef.current.delete(uploadKey);
         }
       }
 
       if (
         refreshAfterUpload &&
-        activeSessionId === target.sessionId &&
+        activeSessionIdRef.current === target.sessionId &&
         normalizeDirectoryPath(currentPathRef.current) === normalizeDirectoryPath(target.remoteDir)
       ) {
         void refreshCurrentDirectory();
       }
     },
-    [activeSessionId, refreshCurrentDirectory],
+    [refreshCurrentDirectory],
   );
 
   const resolveLocalDropPaths = useCallback(async (paths: string[]) => {
@@ -844,37 +830,6 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
       pathInputRef.current?.focus();
     }
   }, [isEditingPath]);
-
-  useEffect(() => {
-    if (!canBrowseFiles || !activeSessionId || !currentPath) return;
-
-    const unlisten = listen<TransferEventPayload>("transfer-event", (event) => {
-      const { session_id, direction, status, remote_path } = event.payload;
-      const uploadKey = remote_path ? `${session_id}:${remote_path}` : null;
-
-      if (
-        session_id !== activeSessionId ||
-        direction !== "upload" ||
-        !remote_path ||
-        !uploadKey ||
-        !pendingManualRefreshUploadsRef.current.has(uploadKey)
-      ) {
-        return;
-      }
-
-      if (status === "completed" || status === "error" || status === "cancelled") {
-        pendingManualRefreshUploadsRef.current.delete(uploadKey);
-      }
-
-      if (status === "completed" && getParentPath(remote_path) === currentPath) {
-        void refreshCurrentDirectory();
-      }
-    });
-
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [activeSessionId, canBrowseFiles, currentPath, refreshCurrentDirectory]);
 
   useEffect(() => {
     const bridge = getExternalFileDropBridge();
