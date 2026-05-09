@@ -182,6 +182,39 @@
     "weeks": "weeks",
     "years": "years"
   },
+  "credentialAutofill": {
+    "dismiss": "Dismiss",
+    "fill": "Fill",
+    "passwordTitle": "Password Credential",
+    "select": "Select",
+    "usernameTitle": "Username Credential"
+  },
+  "credentialManager": {
+    "add": "Add Credential",
+    "deleteConfirm": "Are you sure you want to delete credential '{{name}}'?",
+    "deleteTitle": "Delete Credential",
+    "disabled": "Disabled",
+    "enabled": "Enabled",
+    "expectedLabel": "Expect",
+    "hidePassword": "Hide password",
+    "invalidRegex": "Invalid regular expression",
+    "nameLabel": "Name",
+    "namePlaceholder": "Credential name",
+    "noCredentials": "No credentials stored.",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Password to send",
+    "passwordRegexPlaceholder": "Regular expression for password prompts",
+    "passwordUnchanged": "Leave empty to keep current password",
+    "promptRegexLabel": "Prompt regex",
+    "regexRequired": "Enter a regular expression",
+    "sendLabel": "Send",
+    "sendValueLabel": "Value to send",
+    "showPassword": "Show password",
+    "title": "Credentials",
+    "usernameLabel": "Username",
+    "usernamePlaceholder": "Username to send",
+    "usernameRegexPlaceholder": "Regular expression for username prompts"
+  },
   "dialog": {
     "advancedConfig": "Advanced Configuration",
     "authentication": "Authentication",
@@ -679,7 +712,22 @@
     "user": "User",
     "windtermHint": ".wind/profiles/default.v10/terminal/user.sessions"
   },
+  "secretUnlock": {
+    "emptySecret": "(empty)",
+    "lock": "Lock",
+    "lockAction": "Click to lock",
+    "lockedDesc": "Click the bottom bar and verify the master password to view plaintext passwords in this list.",
+    "lockedTitle": "Plaintext hidden",
+    "masterPasswordPlaceholder": "Enter master password",
+    "unlock": "Unlock",
+    "unlockAction": "Click to unlock",
+    "unlockTitle": "Verify master password",
+    "unlockedDesc": "Plaintext is visible only while this panel stays open.",
+    "unlockedTitle": "Plaintext visible",
+    "wrongPassword": "Wrong master password. Please try again."
+  },
   "securityAuth": {
+    "credentials": "Credentials",
     "keys": "Keys",
     "otp": "OTP",
     "passwords": "Passwords",
