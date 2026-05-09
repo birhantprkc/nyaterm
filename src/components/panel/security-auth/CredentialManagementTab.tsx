@@ -6,9 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { validatePromptRegex } from "@/lib/credentialAutofill";
 import { invoke } from "@/lib/invoke";
 import type { SavedCredential } from "@/types/global";
+import { CopyButton } from "./CopyButton";
 import { SecretUnlockFooter } from "./SecretUnlockFooter";
 
 interface CredentialManagementTabProps {
@@ -211,7 +213,9 @@ export function CredentialManagementTab({
 }: CredentialManagementTabProps) {
   const { t } = useTranslation();
   const [credentials, setCredentials] = useState<SavedCredential[]>([]);
-  const [visiblePasswords, setVisiblePasswords] = useState<Record<string, string>>({});
+  const [passwordCache, setPasswordCache] = useState<Record<string, string>>({});
+  const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
+  const [revealLoadingIds, setRevealLoadingIds] = useState<Set<string>>(new Set());
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editEntry, setEditEntry] = useState<Partial<SavedCredential>>({});
   const [passwordLoading, setPasswordLoading] = useState(false);
@@ -235,32 +239,46 @@ export function CredentialManagementTab({
 
   useEffect(() => {
     if (!secretsUnlocked) {
-      setVisiblePasswords({});
-      return;
+      setPasswordCache({});
+      setRevealedIds(new Set());
+      setRevealLoadingIds(new Set());
     }
+  }, [secretsUnlocked]);
 
-    let cancelled = false;
-    Promise.all(
-      credentials.map(async (entry) => {
-        if (!entry.has_password) return [entry.id, ""] as const;
-        try {
-          const value = await invoke<string | null>("get_saved_credential_password", {
-            id: entry.id,
-          });
-          return [entry.id, value ?? ""] as const;
-        } catch {
-          return [entry.id, ""] as const;
-        }
-      }),
-    ).then((values) => {
-      if (cancelled) return;
-      setVisiblePasswords(Object.fromEntries(values));
-    });
+  const handleToggleReveal = useCallback(
+    async (id: string) => {
+      if (revealedIds.has(id)) {
+        setRevealedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        return;
+      }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [credentials, secretsUnlocked]);
+      if (id in passwordCache) {
+        setRevealedIds((prev) => new Set(prev).add(id));
+        return;
+      }
+
+      setRevealLoadingIds((prev) => new Set(prev).add(id));
+      try {
+        const value = await invoke<string | null>("get_saved_credential_password", { id });
+        setPasswordCache((prev) => ({ ...prev, [id]: value ?? "" }));
+        setRevealedIds((prev) => new Set(prev).add(id));
+      } catch {
+        setPasswordCache((prev) => ({ ...prev, [id]: "" }));
+        setRevealedIds((prev) => new Set(prev).add(id));
+      } finally {
+        setRevealLoadingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }
+    },
+    [revealedIds, passwordCache],
+  );
 
   const resetEdit = useCallback(() => {
     editRequestRef.current += 1;
@@ -349,6 +367,7 @@ export function CredentialManagementTab({
   }, [deletingEntry, loadCredentials]);
 
   const actionsDisabled = editingId !== null;
+  const lockedHint = !secretsUnlocked ? t("secretUnlock.lockedActionHint") : undefined;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -396,7 +415,7 @@ export function CredentialManagementTab({
                     t={t}
                   />
                 ) : (
-                  <div className="flex items-center gap-2 border-b px-3 py-2.5 transition-colors last:border-0 hover:bg-accent">
+                  <div className="flex items-center gap-1.5 border-b px-3 py-2.5 transition-colors last:border-0 hover:bg-accent">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-xs">{entry.name}</span>
@@ -406,38 +425,99 @@ export function CredentialManagementTab({
                           </span>
                         ) : null}
                       </div>
-                      <div className="mt-1 truncate text-[0.6875rem] text-muted-foreground">
-                        {entry.username}
+                      <div className="mt-1 flex items-start gap-0.5">
+                        <span className="min-w-0 select-text break-all text-[0.6875rem] text-muted-foreground">
+                          {entry.username}
+                        </span>
+                        {entry.username ? (
+                          <CopyButton value={entry.username} />
+                        ) : null}
                       </div>
-                      {secretsUnlocked ? (
-                        <div className="mt-1 truncate font-mono text-[0.6875rem] text-muted-foreground">
-                          {visiblePasswords[entry.id] || t("secretUnlock.emptySecret")}
+                      {revealedIds.has(entry.id) ? (
+                        <div className="mt-1 flex items-start gap-0.5">
+                          <span className="min-w-0 select-text break-all font-mono text-[0.6875rem] text-muted-foreground">
+                            {passwordCache[entry.id] || t("secretUnlock.emptySecret")}
+                          </span>
+                          {passwordCache[entry.id] ? (
+                            <CopyButton value={passwordCache[entry.id]} />
+                          ) : null}
                         </div>
                       ) : null}
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        void handleEdit(entry);
-                      }}
-                      disabled={actionsDisabled}
-                      aria-label={t("common.edit")}
-                      title={t("common.edit")}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      className="text-destructive hover:bg-destructive/10"
-                      onClick={() => setDeletingEntry(entry)}
-                      disabled={actionsDisabled}
-                      aria-label={t("common.delete")}
-                      title={t("common.delete")}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    <div className="flex shrink-0 items-center">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => void handleToggleReveal(entry.id)}
+                              disabled={
+                                !secretsUnlocked ||
+                                actionsDisabled ||
+                                revealLoadingIds.has(entry.id)
+                              }
+                              aria-label={
+                                revealedIds.has(entry.id)
+                                  ? t("credentialManager.hidePassword")
+                                  : t("credentialManager.showPassword")
+                              }
+                            >
+                              {revealedIds.has(entry.id) ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {lockedHint ??
+                            (revealedIds.has(entry.id)
+                              ? t("credentialManager.hidePassword")
+                              : t("credentialManager.showPassword"))}
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              onClick={() => {
+                                void handleEdit(entry);
+                              }}
+                              disabled={!secretsUnlocked || actionsDisabled}
+                              aria-label={t("common.edit")}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {lockedHint ?? t("common.edit")}
+                        </TooltipContent>
+                      </Tooltip>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="inline-flex">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeletingEntry(entry)}
+                              disabled={!secretsUnlocked || actionsDisabled}
+                              aria-label={t("common.delete")}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent side="top">
+                          {lockedHint ?? t("common.delete")}
+                        </TooltipContent>
+                      </Tooltip>
+                    </div>
                   </div>
                 )}
               </div>
