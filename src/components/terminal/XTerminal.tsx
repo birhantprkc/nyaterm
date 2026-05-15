@@ -40,7 +40,7 @@ import {
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
 import type { AIContext, CommandRiskResponse } from "@/types/global";
 import { Button } from "../ui/button";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Input } from "../ui/input";
 import ActionLinkMenu from "./ActionLinkMenu";
 import ActionLinkTooltip from "./ActionLinkTooltip";
@@ -1650,6 +1650,7 @@ export default function XTerminal({
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="text-sm">{t("ai.riskPromptTitle")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("ai.riskPromptTitle")}</DialogDescription>
           </DialogHeader>
           {riskPrompt ? (
             <div className="space-y-3 text-xs leading-5">

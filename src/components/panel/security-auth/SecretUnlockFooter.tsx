@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -120,6 +121,7 @@ export function SecretUnlockFooter({ unlocked, onLock, onUnlocked }: SecretUnloc
         <DialogContent showCloseButton={false} className="max-w-xs">
           <DialogHeader>
             <DialogTitle className="text-sm">{t("secretUnlock.unlockTitle")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("secretUnlock.unlockTitle")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Input

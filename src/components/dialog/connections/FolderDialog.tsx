@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -35,6 +36,9 @@ export default function FolderDialog({
           <DialogTitle className="text-sm">
             {isEditing ? t("savedConnections.renameFolder") : t("savedConnections.newFolder")}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {isEditing ? t("savedConnections.renameFolder") : t("savedConnections.newFolder")}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <Input

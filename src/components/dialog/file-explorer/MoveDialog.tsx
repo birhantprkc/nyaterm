@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { invoke } from "@/lib/invoke";
 
 export interface MoveDialogData {
@@ -59,14 +59,16 @@ export default function MoveDialog({ data, onClose, onSuccess }: MoveDialogProps
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSubmitting && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-96 sm:max-w-96">
+      <DialogContent className="w-96 sm:max-w-96">
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle className="text-sm truncate" title={t("fileExplorer.moveTo", { name: data.name })}>
             {t("fileExplorer.moveTo", { name: data.name })}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("fileExplorer.moveTo", { name: data.name })}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label className="text-xs">{t("fileExplorer.moveTo", { name: data.name })}</Label>
           <Input
             className="text-sm"
             value={dialogInput}

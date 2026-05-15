@@ -16,7 +16,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NumberInput } from "@/components/ui/number-input";
@@ -722,6 +722,7 @@ export function SshForm({
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>{t("settings.keyManagement")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("settings.keyManagement")}</DialogDescription>
           </DialogHeader>
           <div className="overflow-y-auto pr-1">
             <KeyManagementTab />
@@ -740,6 +741,7 @@ export function SshForm({
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden">
           <DialogHeader>
             <DialogTitle>{t("passwordManager.title")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("passwordManager.title")}</DialogDescription>
           </DialogHeader>
           <div className="overflow-y-auto pr-1">
             <PasswordManagementTab />

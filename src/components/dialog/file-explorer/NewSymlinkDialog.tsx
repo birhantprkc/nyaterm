@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -56,9 +57,10 @@ export default function NewSymlinkDialog({ data, onClose, onSuccess }: NewSymlin
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSubmitting && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-[480px] sm:max-w-[480px] p-0 gap-0">
+      <DialogContent className="w-[480px] sm:max-w-[480px] p-0 gap-0">
         <DialogHeader className="px-5 py-3 border-b">
           <DialogTitle className="text-sm">{t("fileExplorer.newSymlink")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("fileExplorer.newSymlink")}</DialogDescription>
         </DialogHeader>
 
         <div className="p-5 space-y-4">

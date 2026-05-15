@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -85,9 +86,10 @@ export default function NewItemDialog({ data, onClose, onSuccess }: NewItemDialo
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSubmitting && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-[500px] sm:max-w-[500px] p-0 gap-0">
+      <DialogContent className="w-[500px] sm:max-w-[500px] p-0 gap-0">
         <DialogHeader className="px-5 py-3 border-b">
           <DialogTitle className="text-sm">{t(titleKey)}</DialogTitle>
+          <DialogDescription className="sr-only">{t(titleKey)}</DialogDescription>
         </DialogHeader>
 
         <div className="p-5 space-y-4">

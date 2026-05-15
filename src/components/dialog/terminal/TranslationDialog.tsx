@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -84,6 +85,7 @@ export default function TranslationDialog({
               {providerLabel}
             </span>
           </DialogTitle>
+          <DialogDescription className="sr-only">{t("translation.title")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3">

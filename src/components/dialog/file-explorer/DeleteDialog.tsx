@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -72,13 +73,16 @@ export default function DeleteDialog({ data, onClose, onSuccess }: DeleteDialogP
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSubmitting && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-80 sm:max-w-80">
+      <DialogContent className="w-80 sm:max-w-80">
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle className="text-sm break-words">
             {data.items.length === 1
               ? t("fileExplorer.sureDelete", { name: data.items[0]?.name ?? "" })
               : t("fileExplorer.sureDeleteMultiple", { count: data.items.length })}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("fileExplorer.cmDelete")}
+          </DialogDescription>
         </DialogHeader>
 
         {data.items.length > 1 && (

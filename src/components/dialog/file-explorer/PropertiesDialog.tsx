@@ -7,6 +7,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -179,19 +180,21 @@ export default function PropertiesDialog({ data, onClose }: PropertiesDialogProp
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSaving && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-[420px] sm:max-w-[420px] p-0 gap-0">
-        {/* Header */}
+      <DialogContent className="w-[420px] sm:max-w-[420px] p-0 gap-0">
         <DialogHeader className="px-5 py-3 border-b">
-          <DialogTitle className="text-sm flex items-center gap-2">
+          <DialogTitle className="text-sm flex items-center gap-2 min-w-0">
             {data.is_dir ? (
-              <MdFolder className="text-lg" style={{ color: "#eab308" }} />
+              <MdFolder className="text-lg shrink-0" style={{ color: "#eab308" }} />
             ) : (
-              <MdInsertDriveFile className="text-lg" style={{ color: "var(--df-primary)" }} />
+              <MdInsertDriveFile className="text-lg shrink-0" style={{ color: "var(--df-primary)" }} />
             )}
-            <span className="truncate max-w-[300px]" title={data.name}>
+            <span className="truncate" title={t("fileExplorer.propertiesOf", { name: data.name })}>
               {t("fileExplorer.propertiesOf", { name: data.name })}
             </span>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("fileExplorer.propertiesOf", { name: data.name })}
+          </DialogDescription>
         </DialogHeader>
 
         {/* Body */}
@@ -220,7 +223,7 @@ export default function PropertiesDialog({ data, onClose }: PropertiesDialogProp
                       label: t("fileExplorer.location"),
                       value: (
                         <span
-                          className="truncate break-all select-all font-mono"
+                          className="break-all select-all font-mono"
                           title={getLocation()}
                         >
                           {getLocation()}

@@ -6,12 +6,12 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { invoke } from "@/lib/invoke";
 
 export interface RenameDialogData {
@@ -62,14 +62,16 @@ export default function RenameDialog({ data, onClose, onSuccess }: RenameDialogP
 
   return (
     <Dialog open onOpenChange={(v) => !v && !isSubmitting && onClose()}>
-      <DialogContent aria-describedby={undefined} className="w-80 sm:max-w-80">
+      <DialogContent className="w-80 sm:max-w-80">
         <DialogHeader>
-          <DialogTitle className="text-sm">
+          <DialogTitle className="text-sm truncate" title={t("fileExplorer.renameTo", { name: data.name })}>
             {t("fileExplorer.renameTo", { name: data.name })}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {t("fileExplorer.renameTo", { name: data.name })}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <Label className="text-xs">{t("fileExplorer.renameTo", { name: data.name })}</Label>
           <Input
             className="text-sm"
             value={dialogInput}

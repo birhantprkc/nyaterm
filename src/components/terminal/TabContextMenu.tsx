@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -303,6 +304,7 @@ export default function TabContextMenu({
         <DialogContent showCloseButton={false} className="max-w-xs">
           <DialogHeader>
             <DialogTitle className="text-sm">{t("tabCtx.renameTitle")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("tabCtx.renameTitle")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <Input

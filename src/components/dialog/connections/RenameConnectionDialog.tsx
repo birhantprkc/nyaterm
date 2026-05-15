@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -31,6 +32,7 @@ export default function RenameConnectionDialog({
       <DialogContent showCloseButton={false} className="max-w-xs">
         <DialogHeader>
           <DialogTitle className="text-sm">{t("savedConnections.rename")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("savedConnections.rename")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
           <Input

@@ -109,16 +109,16 @@ export function HostKeyVerifyDialog({ request, onDone }: HostKeyVerifyDialogProp
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-2 py-2 text-xs">
-          <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+        <div className="space-y-2 py-2 text-xs overflow-hidden">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1">
             <span className="text-muted-foreground">{t("settings.hostKeyVerifyHost")}</span>
-            <span className="font-mono">
+            <span className="font-mono truncate" title={`${request?.host}:${request?.port}`}>
               {request?.host}:{request?.port}
             </span>
             <span className="text-muted-foreground">{t("settings.hostKeyVerifyKeyType")}</span>
             <span className="font-mono">{request?.keyType}</span>
             <span className="text-muted-foreground">{t("settings.hostKeyVerifyFingerprint")}</span>
-            <span className="break-all font-mono">{request?.fingerprint}</span>
+            <span className="break-all font-mono select-all">{request?.fingerprint}</span>
           </div>
 
           {request?.isKeyChanged && (

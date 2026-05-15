@@ -241,6 +241,7 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
         {status === "checking" && (
           <DialogHeader>
             <DialogTitle>{t("updater.checking")}</DialogTitle>
+            <DialogDescription className="sr-only">{t("updater.checking")}</DialogDescription>
           </DialogHeader>
         )}
 
@@ -321,6 +322,7 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
             <DialogHeader className="items-center pt-2">
               <MdCheckCircle className="text-4xl text-green-500 mb-2" />
               <DialogTitle>{t("updater.readyToRestart")}</DialogTitle>
+              <DialogDescription className="sr-only">{t("updater.readyToRestart")}</DialogDescription>
             </DialogHeader>
             <DialogFooter className="pt-2">
               <Button size="sm" onClick={handleRelaunch}>
@@ -336,7 +338,7 @@ export default function UpdateDialog({ open, onClose, onUpdateFound }: UpdateDia
             <DialogHeader className="items-center pt-2">
               <MdError className="text-4xl text-red-500 mb-2" />
               <DialogTitle>{t("updater.updateFailed")}</DialogTitle>
-              <DialogDescription className="text-xs break-all">{error}</DialogDescription>
+              <DialogDescription className="text-xs break-words overflow-hidden">{error}</DialogDescription>
             </DialogHeader>
             <DialogFooter className="pt-2">
               <Button variant="outline" size="sm" onClick={onClose}>

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -65,9 +66,10 @@ export default function VariablePromptDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onCancel()}>
-      <DialogContent aria-describedby={undefined} className="w-[400px] sm:max-w-[400px] p-0 gap-0">
+      <DialogContent className="w-[400px] sm:max-w-[400px] p-0 gap-0">
         <DialogHeader className="px-5 py-3 border-b">
           <DialogTitle className="text-sm">{t("quickCommands.fillVariables")}</DialogTitle>
+          <DialogDescription className="sr-only">{t("quickCommands.fillVariables")}</DialogDescription>
         </DialogHeader>
 
         <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
