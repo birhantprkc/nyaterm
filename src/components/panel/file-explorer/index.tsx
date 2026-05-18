@@ -445,6 +445,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
   const alwaysUploadFilesRef = useRef<Set<string>>(new Set());
   const filesRef = useRef<FileEntry[]>([]);
   const activeSessionIdRef = useRef<string | null>(null);
+  const canBrowseFilesRef = useRef(canBrowseFiles);
   const currentPathRef = useRef("");
   const homeDirRef = useRef("");
   const listContainerRef = useRef<HTMLDivElement | null>(null);
@@ -467,6 +468,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
 
   filesRef.current = files;
   activeSessionIdRef.current = activeSessionId;
+  canBrowseFilesRef.current = canBrowseFiles;
   currentPathRef.current = currentPath;
   homeDirRef.current = homeDir;
 
@@ -990,11 +992,13 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
         getDragEventPosition(event),
         listContainerRef.current,
       );
-      const isActive = canBrowseFiles && !!activeSessionId && isOverDropTarget;
+      const isActive =
+        canBrowseFilesRef.current && !!activeSessionIdRef.current && isOverDropTarget;
 
       setIsExternalDropActive(isActive);
       if (event.dataTransfer) {
-        event.dataTransfer.dropEffect = isActive ? "copy" : "none";
+        event.dataTransfer.dropEffect =
+          event.type === "dragenter" || isActive ? "copy" : "none";
       }
     };
 
@@ -1029,7 +1033,8 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
       const isOverDropTarget = isDropPositionInsideElement(dropPosition, listContainerRef.current);
       resetExternalDropHover();
 
-      if (!canBrowseFiles || !activeSessionId || !isOverDropTarget) {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!canBrowseFilesRef.current || !currentSessionId || !isOverDropTarget) {
         return;
       }
 
@@ -1046,7 +1051,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
             event: "file_explorer.external_drop_filelist_bridge_failed",
             message:
               "Failed to bridge external file drop FileList through WebView2 additional objects",
-            ids: { session_id: activeSessionId },
+            ids: { session_id: currentSessionId },
             data: {
               remote_dir:
                 normalizeDirectoryPath(currentPathRef.current) || homeDirRef.current || "/",
@@ -1067,7 +1072,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
               domain: "ui.error",
               event: "file_explorer.external_drop_objects_unavailable",
               message: "External file drop did not expose any transferable WebView2 objects",
-              ids: { session_id: activeSessionId },
+              ids: { session_id: currentSessionId },
               data: {
                 remote_dir:
                   normalizeDirectoryPath(currentPathRef.current) || homeDirRef.current || "/",
@@ -1088,7 +1093,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
             domain: "ui.error",
             event: "file_explorer.external_drop_bridge_failed",
             message: "Failed to bridge external file drop through WebView2 additional objects",
-            ids: { session_id: activeSessionId },
+            ids: { session_id: currentSessionId },
             data: {
               remote_dir:
                 normalizeDirectoryPath(currentPathRef.current) || homeDirRef.current || "/",
@@ -1118,7 +1123,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
       window.removeEventListener("drop", handleWindowDrop);
       window.removeEventListener("blur", handleWindowBlur);
     };
-  }, [activeSessionId, canBrowseFiles, resetExternalDropHover, t]);
+  }, [resetExternalDropHover, t]);
 
   useEffect(() => {
     const bridge = getExternalFileDropBridge();
@@ -1144,14 +1149,14 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
         listContainerRef.current,
       );
 
-      if (!canBrowseFiles || !activeSessionId || !isOverDropTarget) {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!canBrowseFilesRef.current || !currentSessionId || !isOverDropTarget) {
         return;
       }
 
-      const target = resolveUploadTarget();
-      if (!target) {
-        return;
-      }
+      const remoteDir =
+        normalizeDirectoryPath(currentPathRef.current) || homeDirRef.current || "/";
+      const target = { sessionId: currentSessionId, remoteDir };
       const dropPaths = event.payload.paths;
 
       void processExternalDropPaths(target, dropPaths);
@@ -1162,13 +1167,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
       resetExternalDropHover();
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [
-    activeSessionId,
-    canBrowseFiles,
-    processExternalDropPaths,
-    resetExternalDropHover,
-    resolveUploadTarget,
-  ]);
+  }, [processExternalDropPaths, resetExternalDropHover]);
 
   useEffect(() => {
     const bridge = getExternalFileDropBridge();
@@ -1199,7 +1198,8 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
         payload.position,
         listContainerRef.current,
       );
-      const isActive = canBrowseFiles && !!activeSessionId && isOverDropTarget;
+      const isActive =
+        canBrowseFilesRef.current && !!activeSessionIdRef.current && isOverDropTarget;
 
       if (payload.type === "enter" || payload.type === "over") {
         setIsExternalDropActive(isActive);
@@ -1212,10 +1212,14 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
         return;
       }
 
-      const target = resolveUploadTarget();
-      if (!target) {
+      const currentSessionId = activeSessionIdRef.current;
+      if (!currentSessionId) {
         return;
       }
+
+      const remoteDir =
+        normalizeDirectoryPath(currentPathRef.current) || homeDirRef.current || "/";
+      const target = { sessionId: currentSessionId, remoteDir };
 
       void processExternalDropPaths(target, payload.paths);
     });
@@ -1226,13 +1230,7 @@ function FileExplorer({ activeSessionId, activeSessionType }: FileExplorerProps)
       window.removeEventListener("blur", handleWindowBlur);
       unlistenPromise.then((unlisten) => unlisten());
     };
-  }, [
-    activeSessionId,
-    canBrowseFiles,
-    processExternalDropPaths,
-    resetExternalDropHover,
-    resolveUploadTarget,
-  ]);
+  }, [processExternalDropPaths, resetExternalDropHover]);
 
   const filteredSortedFiles = useMemo(
     () =>
