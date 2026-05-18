@@ -35,6 +35,7 @@ use super::ui::UiConfig;
 use super::{load_json_doc, save_json_doc};
 use crate::error::AppResult;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::AppHandle;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -65,6 +66,9 @@ pub struct AppSettings {
     pub cloud_sync: CloudSyncSettings,
     #[serde(default)]
     pub ui: UiConfig,
+    /// User-customized keyboard shortcut overrides. Keys are shortcut IDs, values are hotkey strings.
+    #[serde(default)]
+    pub keybindings: HashMap<String, String>,
 }
 
 pub fn load_app_settings(app: &AppHandle) -> AppResult<AppSettings> {
