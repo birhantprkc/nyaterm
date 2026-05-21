@@ -2,7 +2,7 @@ import type { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
 import type { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
-import { shouldSuspendTerminalWebglForBackground } from "@/lib/backgroundImage";
+import { isTerminalTransparencyEnabled } from "@/lib/backgroundImage";
 import type { TerminalColors } from "@/lib/themes";
 import type { AppSettings } from "@/types/global";
 
@@ -15,13 +15,13 @@ export function useTerminalSettings(
   interaction: AppSettings["interaction"],
 ) {
   const webglAddonRef = useRef<WebglAddon | null>(null);
-  const suspendWebglForBackground = shouldSuspendTerminalWebglForBackground(appearance);
+  const terminalTransparencyEnabled = isTerminalTransparencyEnabled(appearance);
 
   // React to hardware acceleration settings changes
   useEffect(() => {
     if (!terminalRef.current) return;
 
-    if (terminalSettings.hardware_acceleration && !suspendWebglForBackground) {
+    if (terminalSettings.hardware_acceleration && !terminalTransparencyEnabled) {
       if (!webglAddonRef.current) {
         try {
           const webgl = new WebglAddon();
@@ -48,7 +48,7 @@ export function useTerminalSettings(
         webglAddonRef.current = null;
       }
     };
-  }, [terminalSettings.hardware_acceleration, suspendWebglForBackground, terminalRef]);
+  }, [terminalSettings.hardware_acceleration, terminalTransparencyEnabled, terminalRef]);
   // React to terminal theme changes: update terminal colors dynamically
   useEffect(() => {
     if (terminalRef.current) {

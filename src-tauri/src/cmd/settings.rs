@@ -14,13 +14,17 @@ fn schedule_cloud_sync_notify(app: tauri::AppHandle) {
 }
 
 #[tauri::command]
-pub fn get_system_fonts() -> Vec<String> {
-    list_system_font_families()
+pub async fn get_system_fonts() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(list_system_font_families)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub fn get_system_font_infos() -> Vec<FontInfo> {
-    list_system_font_infos()
+pub async fn get_system_font_infos() -> Vec<FontInfo> {
+    tauri::async_runtime::spawn_blocking(list_system_font_infos)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]

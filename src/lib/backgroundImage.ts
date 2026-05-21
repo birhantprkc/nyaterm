@@ -28,8 +28,14 @@ export function isBackgroundImageEnabled(
   return Boolean(appearance.background_image_path?.trim());
 }
 
+export function isTerminalTransparencyEnabled(
+  appearance: Pick<AppearanceSettings, "background_image_path">,
+) {
+  return isBackgroundImageEnabled(appearance);
+}
+
 export function shouldSuspendTerminalWebglForBackground(appearance: AppearanceSettings) {
-  return isBackgroundImageEnabled(appearance) && clampOpacity(appearance.background_opacity) < 1;
+  return isTerminalTransparencyEnabled(appearance);
 }
 
 function quoteCssUrl(url: string) {
@@ -40,9 +46,7 @@ function quoteCssUrl(url: string) {
  * Load a background image file via a Rust command and return a data URL.
  * Returns empty string if the path is empty or the file cannot be read.
  */
-export async function loadBackgroundImageDataUrl(
-  path: string | null | undefined,
-): Promise<string> {
+export async function loadBackgroundImageDataUrl(path: string | null | undefined): Promise<string> {
   const trimmed = path?.trim();
   if (!trimmed) return "";
   try {
@@ -156,7 +160,7 @@ export function buildTerminalThemeColors(
   terminalColors: TerminalColors,
   appearance: AppearanceSettings,
 ): TerminalColors {
-  if (!isBackgroundImageEnabled(appearance)) {
+  if (!isTerminalTransparencyEnabled(appearance)) {
     return terminalColors;
   }
 

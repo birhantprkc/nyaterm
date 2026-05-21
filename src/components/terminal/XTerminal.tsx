@@ -19,7 +19,7 @@ import { useTerminalSearch } from "@/hooks/useTerminalSearch";
 import { useTerminalSettings } from "@/hooks/useTerminalSettings";
 import { emitAIErrorDetected } from "@/lib/aiEvents";
 import { renderAiCommandEnd, renderAiCommandStart } from "@/lib/aiTerminalRenderer";
-import { buildTerminalThemeColors } from "@/lib/backgroundImage";
+import { buildTerminalThemeColors, isTerminalTransparencyEnabled } from "@/lib/backgroundImage";
 import { readClipboardText } from "@/lib/clipboard";
 import { invoke } from "@/lib/invoke";
 import { hexLuminance } from "@/lib/keywordHighlightPresets";
@@ -258,6 +258,7 @@ export default function XTerminal({
     () => buildTerminalThemeColors(terminalTheme.colors.terminal, appearance),
     [appearance, terminalTheme.colors.terminal],
   );
+  const terminalTransparencyEnabled = isTerminalTransparencyEnabled(appearance);
   const showLineNumbers = terminalSettings.show_line_numbers;
   const showTimestamps = terminalSettings.show_timestamps;
   const showGutter = showLineNumbers || showTimestamps;
@@ -464,7 +465,7 @@ export default function XTerminal({
       fontFamily: appearance.font_family,
       wordSeparator: interaction.word_separators,
       theme: { ...terminalThemeColors },
-      allowTransparency: true,
+      allowTransparency: terminalTransparencyEnabled,
       allowProposedApi: true,
     });
 
@@ -1411,8 +1412,11 @@ export default function XTerminal({
     if (active && visible && fitAddonRef.current && terminalRef.current) {
       requestAnimationFrame(() => {
         fitAddonRef.current?.fit();
-        terminalRef.current?.refresh(0, Math.max(0, terminalRef.current.rows - 1));
-        terminalRef.current?.focus();
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        terminal.clearTextureAtlas();
+        terminal.refresh(0, Math.max(0, terminal.rows - 1));
+        terminal.focus();
       });
     }
   }, [active, visible]);

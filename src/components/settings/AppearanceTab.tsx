@@ -1,5 +1,5 @@
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MdAdd, MdClose, MdDeleteOutline, MdFolderOpen, MdImage } from "react-icons/md";
 import { Button } from "@/components/ui/button";
@@ -14,23 +14,21 @@ import {
 import { useApp } from "@/context/AppContext";
 import {
   BACKGROUND_IMAGE_FITS,
-  buildBackgroundImageLayerStyle,
-  buildSurfaceCssVariables,
   clampOpacity,
   DEFAULT_BACKGROUND_CONTENT_OPACITY,
   DEFAULT_BACKGROUND_IMAGE_FIT,
   DEFAULT_BACKGROUND_IMAGE_OPACITY,
   isBackgroundImageEnabled,
-  loadBackgroundImageDataUrl,
   normalizeBackgroundImageFit,
 } from "@/lib/backgroundImage";
 import { invoke } from "@/lib/invoke";
+import { logger } from "@/lib/logger";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   MAX_TERMINAL_FONT_SIZE,
   MIN_TERMINAL_FONT_SIZE,
 } from "@/lib/terminalFontSize";
-import { DEFAULT_THEME_ID, themeList, themes } from "@/lib/themes";
+import { themeList } from "@/lib/themes";
 import type { AppearanceSettings } from "@/types/global";
 import {
   SettingFieldGrid,
@@ -61,6 +59,8 @@ const TERMINAL_BUILT_IN_FONTS = new Set(
   PACKAGE_FONT_INFOS.filter((font) => font.monospace).map((font) => font.family.toLowerCase()),
 );
 const BACKGROUND_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "bmp"];
+let cachedSystemFontInfos: FontInfo[] | null = null;
+let systemFontInfosRequest: Promise<FontInfo[]> | null = null;
 
 function splitFontStack(fontFamily: string) {
   return fontFamily
@@ -81,6 +81,42 @@ function mergeFontFamilies(...fontLists: string[][]) {
     merged.push(normalized);
   }
   return merged;
+}
+
+function requestSystemFontInfos() {
+  if (cachedSystemFontInfos !== null) {
+    return Promise.resolve(cachedSystemFontInfos);
+  }
+
+  if (!systemFontInfosRequest) {
+    systemFontInfosRequest = invoke<FontInfo[]>("get_system_font_infos")
+      .then((fonts) => {
+        cachedSystemFontInfos = fonts;
+        return fonts;
+      })
+      .catch((error) => {
+        systemFontInfosRequest = null;
+        logger.warn({
+          domain: "ui.action",
+          event: "system_font_infos_load_failed",
+          message: "Failed to load system font list",
+          error,
+        });
+        cachedSystemFontInfos = [];
+        return cachedSystemFontInfos;
+      });
+  }
+
+  return systemFontInfosRequest;
+}
+
+function InlineSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      className="size-3 shrink-0 animate-spin rounded-full border border-muted-foreground/30 border-t-muted-foreground"
+    />
+  );
 }
 
 function previewFontFamily(font: string, fallback: "sans-serif" | "monospace") {
@@ -134,113 +170,6 @@ function PercentSlider({
   );
 }
 
-function BackgroundPreview({ appearance }: { appearance: AppearanceSettings }) {
-  const { t } = useTranslation();
-  const backgroundImagePath = appearance.background_image_path?.trim() ?? "";
-  const hasImage = Boolean(backgroundImagePath);
-  const [dataUrl, setDataUrl] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-
-    setDataUrl("");
-    if (!backgroundImagePath) return;
-
-    void loadBackgroundImageDataUrl(backgroundImagePath).then((url) => {
-      if (!cancelled) setDataUrl(url);
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [backgroundImagePath]);
-
-  const canShowImage = hasImage && Boolean(dataUrl);
-  const previewAppearance = canShowImage
-    ? appearance
-    : {
-        ...appearance,
-        background_image_path: null,
-      };
-  const previewTheme = themes[appearance.theme] || themes[DEFAULT_THEME_ID];
-  const previewSurfaceStyle = {
-    ...buildSurfaceCssVariables(previewTheme.colors, previewAppearance),
-    backgroundColor: previewTheme.colors.bg,
-    color: "var(--df-text)",
-  };
-
-  return (
-    <div
-      className="relative h-44 overflow-hidden rounded-lg border border-border/70 shadow-inner"
-      style={previewSurfaceStyle}
-    >
-      {canShowImage && (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0"
-          style={buildBackgroundImageLayerStyle(appearance, dataUrl)}
-        />
-      )}
-      {!canShowImage && (
-        <div
-          aria-hidden="true"
-          className="absolute inset-0"
-          style={{
-            background:
-              "linear-gradient(135deg, var(--df-bg-terminal), var(--df-bg-panel) 55%, var(--df-bg-hover))",
-          }}
-        />
-      )}
-      <div className="relative z-10 flex h-full min-w-0 flex-col">
-        <div
-          className="flex h-8 shrink-0 items-center gap-2 border-b px-3"
-          style={{ backgroundColor: "var(--df-bg-panel)", borderColor: "var(--df-border)" }}
-        >
-          <div className="flex gap-1">
-            <span className="h-2 w-2 rounded-full bg-red-400/80" />
-            <span className="h-2 w-2 rounded-full bg-amber-400/80" />
-            <span className="h-2 w-2 rounded-full bg-emerald-400/80" />
-          </div>
-          <span className="truncate text-xs font-medium text-muted-foreground">NyaTerm</span>
-        </div>
-        <div className="grid min-h-0 flex-1 grid-cols-[2.25rem_minmax(0,1fr)_8rem]">
-          <div
-            className="flex flex-col items-center gap-2 border-r py-3"
-            style={{ backgroundColor: "var(--df-bg)", borderColor: "var(--df-border)" }}
-          >
-            <span className="h-5 w-5 rounded-md bg-primary/80" />
-            <span className="h-5 w-5 rounded-md bg-muted-foreground/30" />
-            <span className="mt-auto h-5 w-5 rounded-md bg-muted-foreground/30" />
-          </div>
-          <div
-            className="min-w-0 p-3 font-mono text-[0.68rem] leading-5"
-            style={{ backgroundColor: "var(--df-bg-terminal)" }}
-          >
-            <div className="text-primary">$ ssh nyaterm.local</div>
-            <div>systemctl status nyaterm</div>
-            <div className="text-muted-foreground">● active · terminal workspace</div>
-            <div className="mt-2 h-2 w-4/5 rounded-full bg-primary/30" />
-            <div className="mt-2 h-2 w-2/3 rounded-full bg-muted-foreground/30" />
-          </div>
-          <div
-            className="hidden border-l p-3 sm:block"
-            style={{ backgroundColor: "var(--df-bg-panel)", borderColor: "var(--df-border)" }}
-          >
-            <div className="mb-3 text-[0.65rem] font-medium text-muted-foreground">
-              {t("settings.backgroundPreviewPanel")}
-            </div>
-            <div className="space-y-2">
-              <div className="h-2 rounded-full bg-primary/35" />
-              <div className="h-2 rounded-full bg-muted-foreground/25" />
-              <div className="h-2 w-2/3 rounded-full bg-muted-foreground/25" />
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function BackgroundImageSection({
   appearance,
   onChange,
@@ -285,8 +214,6 @@ function BackgroundImageSection({
       desc={t("settings.backgroundImageDesc")}
       contentClassName="space-y-5"
     >
-      <BackgroundPreview appearance={appearance} />
-
       <div className="flex flex-col gap-2 sm:flex-row">
         <div className="flex min-h-9 min-w-0 flex-1 items-center rounded-md border border-border/70 bg-background/60 px-3 py-2 text-xs">
           {hasImage ? (
@@ -370,6 +297,8 @@ interface FontStackSectionProps {
   builtInFonts: Set<string>;
   fallbackFont: string;
   previewFallback: "sans-serif" | "monospace";
+  isLoadingOptions: boolean;
+  onRequestOptions: () => void;
   onChange: (value: string) => void;
 }
 
@@ -381,9 +310,12 @@ function FontStackSection({
   builtInFonts,
   fallbackFont,
   previewFallback,
+  isLoadingOptions,
+  onRequestOptions,
   onChange,
 }: FontStackSectionProps) {
   const { t } = useTranslation();
+  const [openFontIndex, setOpenFontIndex] = useState<number | null>(null);
   const fonts = splitFontStack(value);
 
   return (
@@ -410,6 +342,7 @@ function FontStackSection({
         const selectedFont = options.find((option) => option.toLowerCase() === font.toLowerCase());
         const selectValue = selectedFont ?? font;
         const isKnownFont = Boolean(selectedFont);
+        const showLoading = openFontIndex === idx && isLoadingOptions;
 
         return (
           <div
@@ -424,6 +357,13 @@ function FontStackSection({
               </div>
               <Select
                 value={selectValue}
+                onOpenChange={(open) => {
+                  setOpenFontIndex((current) => {
+                    if (open) return idx;
+                    return current === idx ? null : current;
+                  });
+                  if (open) onRequestOptions();
+                }}
                 onValueChange={(nextFont) => {
                   const nextFonts = [...arr];
                   nextFonts[idx] = nextFont;
@@ -437,6 +377,15 @@ function FontStackSection({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
+                  {showLoading && (
+                    <output
+                      aria-live="polite"
+                      className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"
+                    >
+                      <InlineSpinner />
+                      {t("settings.loadingSystemFonts")}
+                    </output>
+                  )}
                   {!isKnownFont && (
                     <SelectItem
                       value={font}
@@ -447,11 +396,7 @@ function FontStackSection({
                     </SelectItem>
                   )}
                   {options.map((option) => (
-                    <SelectItem
-                      key={option}
-                      value={option}
-                      style={{ fontFamily: previewFontFamily(option, previewFallback) }}
-                    >
+                    <SelectItem key={option} value={option}>
                       {option}{" "}
                       {builtInFonts.has(option.toLowerCase()) && `(${t("settings.fontBuiltIn")})`}
                     </SelectItem>
@@ -483,7 +428,13 @@ export function AppearanceTab() {
   const { t } = useTranslation();
   const { appSettings, updateAppSettings } = useApp();
   const appearance = appSettings.appearance;
-  const [systemFontInfos, setSystemFontInfos] = useState<FontInfo[]>([]);
+  const mountedRef = useRef(true);
+  const [systemFontInfos, setSystemFontInfos] = useState<FontInfo[]>(
+    () => cachedSystemFontInfos ?? [],
+  );
+  const [systemFontInfosLoading, setSystemFontInfosLoading] = useState(
+    () => Boolean(systemFontInfosRequest) && cachedSystemFontInfos === null,
+  );
   const applicationFonts = useMemo(
     () =>
       mergeFontFamilies(
@@ -503,9 +454,25 @@ export function AppearanceTab() {
   );
 
   useEffect(() => {
-    invoke<FontInfo[]>("get_system_font_infos")
-      .then((fonts) => setSystemFontInfos(fonts))
-      .catch(console.error);
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const loadSystemFontInfos = useCallback(() => {
+    if (cachedSystemFontInfos !== null) {
+      setSystemFontInfos(cachedSystemFontInfos);
+      setSystemFontInfosLoading(false);
+      return;
+    }
+
+    setSystemFontInfosLoading(true);
+    void requestSystemFontInfos().then((fonts) => {
+      if (!mountedRef.current) return;
+      setSystemFontInfos(fonts);
+      setSystemFontInfosLoading(false);
+    });
   }, []);
 
   const updateAppearance = (patch: Partial<AppearanceSettings>) =>
@@ -556,6 +523,8 @@ export function AppearanceTab() {
         builtInFonts={PACKAGE_BUILT_IN_FONTS}
         fallbackFont={UI_FALLBACK_FONT}
         previewFallback="sans-serif"
+        isLoadingOptions={systemFontInfosLoading}
+        onRequestOptions={loadSystemFontInfos}
         onChange={(uiFontFamily) =>
           updateAppearance({
             ui_font_family: uiFontFamily,
@@ -571,6 +540,8 @@ export function AppearanceTab() {
         builtInFonts={TERMINAL_BUILT_IN_FONTS}
         fallbackFont={TERMINAL_FALLBACK_FONT}
         previewFallback="monospace"
+        isLoadingOptions={systemFontInfosLoading}
+        onRequestOptions={loadSystemFontInfos}
         onChange={(terminalFontFamily) =>
           updateAppearance({
             font_family: terminalFontFamily,
