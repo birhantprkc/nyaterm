@@ -76,7 +76,7 @@ export function OtpCodePanel({
   const containerClassName = useMemo(
     () =>
       [
-        "rounded-md border border-border/70 bg-background/70 px-3 py-3",
+        "min-w-0 rounded-md border border-border/70 bg-background/70 px-3 py-3",
         variant === "dialog" ? "space-y-3" : "space-y-2.5",
         className,
       ]
@@ -187,7 +187,7 @@ export function OtpCodePanel({
           ) : null}
 
           <div
-            className={`flex gap-2 ${variant === "dialog" ? "flex-col sm:flex-row" : "flex-wrap"}`}
+            className={`flex gap-2 ${variant === "dialog" ? "flex-col sm:flex-row sm:flex-wrap" : "flex-wrap"}`}
           >
             <Button
               variant="outline"
