@@ -49,9 +49,18 @@ async function getMainWindow() {
 
 async function getOpenModalChildWindows() {
   const windows = await WebviewWindow.getAll();
-  return windows.filter(
+  const modalWindows = windows.filter(
     (window) => window.label !== MAIN_WINDOW_LABEL && isModalChildLabel(window.label),
   );
+  const visibleStates = await Promise.all(
+    modalWindows.map((window) => window.isVisible().catch(() => false)),
+  );
+  return modalWindows.filter((_, index) => visibleStates[index]);
+}
+
+export async function getOpenModalChildWindowLabels() {
+  const windows = await getOpenModalChildWindows();
+  return windows.map((window) => window.label);
 }
 
 async function setMainWindowModalBlocking(mainWindow: TauriWindow, hasModalChild: boolean) {
@@ -100,7 +109,7 @@ function attachChildWindowDestroyedHandler(label: string, win: WebviewWindow) {
     registeredDestroyedHandlers.delete(label);
     readyChildWindowLabels.delete(label);
     emit("child-window-closed", { label });
-    void syncMainWindowModalState();
+    void prepareForModalChildClose(label);
   });
 }
 
@@ -177,6 +186,7 @@ export async function openChildWindow(opts: ChildWindowOptions) {
     if (isVisible) {
       await existing.show().catch(() => {});
       await existing.setFocus().catch(() => {});
+      emit("child-window-opened", { label: opts.label });
       await syncMainWindowModalState().catch(() => {});
     } else {
       await revealChildWindow(existing, opts.label);
