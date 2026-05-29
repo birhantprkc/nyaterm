@@ -304,7 +304,7 @@ Thanks to the following projects and libraries that make NyaTerm possible:
 <a name="contributors"></a>
 # Contributors
 
-Thanks to all clawtributors:
+Thanks to all contributors:
 
 <a href="https://github.com/nyakang/nyaterm/graphs/contributors">
   <img src="https://contrib.rocks/image?repo=nyakang/nyaterm" />
