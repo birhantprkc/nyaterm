@@ -671,6 +671,8 @@
     "importTitle": "Import Quick Commands",
     "importWindTerm": "WindTerm Quickbar",
     "importWindTermHint": "quickbar.config",
+    "importXshell": "Xshell Quick Commands",
+    "importXshellHint": ".xts",
     "importing": "Importing...",
     "label": "Label",
     "labelName": "Label",

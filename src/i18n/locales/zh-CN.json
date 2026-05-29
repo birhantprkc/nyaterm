@@ -671,6 +671,8 @@
     "importTitle": "导入快捷命令",
     "importWindTerm": "WindTerm Quickbar",
     "importWindTermHint": "quickbar.config",
+    "importXshell": "Xshell 快捷命令",
+    "importXshellHint": ".xts",
     "importing": "正在导入...",
     "label": "标签",
     "labelName": "标签名称",
