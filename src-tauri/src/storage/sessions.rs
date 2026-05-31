@@ -96,6 +96,7 @@ impl Storage {
             return Ok(());
         };
         connection.last_used_at_ms = Some(current_time_ms());
+        hydrate_connection_password_in_txn(&txn, &mut connection)?;
         save_connection_in_txn(&txn, &connection)?;
         txn.commit().map_err(storage_error)?;
         Ok(())
@@ -207,6 +208,25 @@ pub(super) fn save_connection_in_txn(
     }
     write_json_in_txn(txn, CONNECTIONS_TABLE, &connection_key, &connection)?;
     insert_connection_indexes(txn, &connection)?;
+    Ok(())
+}
+fn hydrate_connection_password_in_txn(
+    txn: &redb::WriteTransaction,
+    connection: &mut crate::config::SavedConnection,
+) -> AppResult<()> {
+    let Some(auth) = connection.auth.as_mut() else {
+        return Ok(());
+    };
+    if auth.password.is_some() {
+        return Ok(());
+    }
+    let table = txn.open_table(CREDENTIALS_TABLE).map_err(storage_error)?;
+    let key = entity_key(CONNECTION_PASSWORD_PREFIX, &connection.id);
+    if let Some(raw) = table.get(key.as_str()).map_err(storage_error)? {
+        let record: ConnectionPasswordRecord = deserialize_json(raw.value())?;
+        auth.password = Some(record.password);
+        auth.has_password = true;
+    }
     Ok(())
 }
 fn existing_connection_created_at(

@@ -110,6 +110,27 @@ fn connection_crud_and_group_index_roundtrip() {
         .auth
         .and_then(|auth| auth.password)
         .is_none());
+    assert_eq!(
+        storage
+            .get_connection_with_secret("one")
+            .expect("get one with secret")
+            .expect("one")
+            .auth
+            .and_then(|auth| auth.password),
+        Some("cipher-one".to_string())
+    );
+    storage
+        .mark_connection_used("one")
+        .expect("mark connection used");
+    assert_eq!(
+        storage
+            .get_connection_with_secret("one")
+            .expect("get one with secret after mark used")
+            .expect("one")
+            .auth
+            .and_then(|auth| auth.password),
+        Some("cipher-one".to_string())
+    );
     let group_a = storage
         .list_connections_by_group(Some("group-a"))
         .expect("list group a");
