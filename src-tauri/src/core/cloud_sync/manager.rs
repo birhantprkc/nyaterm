@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
@@ -26,6 +28,9 @@ use crate::core::portable_snapshot::{
 };
 
 const BACKUP_CHECK_INTERVAL: Duration = Duration::from_secs(60);
+const CLOUD_SYNC_STARTUP_CHECK_TIMEOUT: Duration = Duration::from_secs(30);
+const CLOUD_SYNC_OPERATION_TIMEOUT: Duration = Duration::from_secs(300);
+const CLOUD_SYNC_QUICK_OPERATION_TIMEOUT: Duration = Duration::from_secs(60);
 const AUTOMATIC_RETRY_BACKOFF_MS: [u64; 4] = [60_000, 300_000, 900_000, 3_600_000];
 
 pub struct CloudSyncManager {
@@ -99,11 +104,14 @@ impl CloudSyncManager {
         if settings.enabled && settings.auto_check_on_startup {
             let manager = Arc::clone(self);
             async_runtime::spawn(async move {
-                if let Err(error) = manager.startup_check().await {
-                    manager
-                        .record_failure("sync", "startup_check", &error)
-                        .await;
-                    tracing::warn!("Startup cloud sync check failed: {}", error);
+                if let Err(error) = with_operation_timeout(
+                    "startup_check",
+                    CLOUD_SYNC_STARTUP_CHECK_TIMEOUT,
+                    manager.startup_check(),
+                )
+                .await
+                {
+                    manager.handle_startup_check_failure(error).await;
                 }
             });
         }
@@ -112,15 +120,12 @@ impl CloudSyncManager {
     }
 
     pub async fn replace_settings(&self, settings: CloudSyncSettings) -> AppResult<()> {
+        let enabled = settings.enabled;
+        let provider = settings.provider.clone();
         *self.settings.lock().await = settings.clone();
         self.reset_automatic_retry().await;
-        self.set_status(
-            if settings.enabled { "idle" } else { "disabled" },
-            String::new(),
-            None,
-            None,
-        )
-        .await;
+        self.set_status_after_settings_replace(enabled, provider)
+            .await;
         Ok(())
     }
 
@@ -146,16 +151,20 @@ impl CloudSyncManager {
     pub async fn test_connection(&self) -> AppResult<()> {
         let started = Instant::now();
         let settings = self.settings.lock().await.clone();
-        let result = async {
-            let _ = require_master_password()?;
-            let operator = build_operator(&settings)?;
-            ensure_remote_layout(&operator, &settings.remote_root).await?;
-            let _ = operator
-                .exists(&remote_path(&settings.remote_root, SYNC_SNAPSHOTS_DIR))
-                .await
-                .map_err(map_storage_error)?;
-            Ok::<(), AppError>(())
-        }
+        let result = with_operation_timeout(
+            "test_connection",
+            CLOUD_SYNC_QUICK_OPERATION_TIMEOUT,
+            async {
+                let _ = require_master_password()?;
+                let operator = build_operator(&settings)?;
+                ensure_remote_layout(&operator, &settings.remote_root).await?;
+                let _ = operator
+                    .exists(&remote_path(&settings.remote_root, SYNC_SNAPSHOTS_DIR))
+                    .await
+                    .map_err(map_storage_error)?;
+                Ok::<(), AppError>(())
+            },
+        )
         .await;
 
         match result {
@@ -184,7 +193,13 @@ impl CloudSyncManager {
     }
 
     pub async fn sync_push_now(self: &Arc<Self>, trigger: &str) -> AppResult<()> {
-        match self.push_snapshot(trigger, false).await {
+        match with_operation_timeout(
+            trigger,
+            CLOUD_SYNC_OPERATION_TIMEOUT,
+            self.push_snapshot(trigger, false),
+        )
+        .await
+        {
             Ok(()) => {
                 self.reset_automatic_retry().await;
                 Ok(())
@@ -197,7 +212,13 @@ impl CloudSyncManager {
     }
 
     pub async fn sync_pull_now(self: &Arc<Self>, trigger: &str) -> AppResult<()> {
-        match self.pull_snapshot(trigger, false).await {
+        match with_operation_timeout(
+            trigger,
+            CLOUD_SYNC_OPERATION_TIMEOUT,
+            self.pull_snapshot(trigger, false),
+        )
+        .await
+        {
             Ok(()) => {
                 self.reset_automatic_retry().await;
                 Ok(())
@@ -210,7 +231,13 @@ impl CloudSyncManager {
     }
 
     pub async fn run_cloud_backup_now(self: &Arc<Self>, trigger: &str) -> AppResult<()> {
-        match self.backup_snapshot(trigger).await {
+        match with_operation_timeout(
+            trigger,
+            CLOUD_SYNC_OPERATION_TIMEOUT,
+            self.backup_snapshot(trigger),
+        )
+        .await
+        {
             Ok(()) => {
                 self.reset_automatic_retry().await;
                 Ok(())
@@ -223,14 +250,17 @@ impl CloudSyncManager {
     }
 
     pub async fn resolve_cloud_sync_conflict(self: &Arc<Self>, action: &str) -> AppResult<()> {
-        let result = match action {
-            "upload_local" => self.push_snapshot("resolve_upload", true).await,
-            "download_remote" => self.pull_snapshot("resolve_download", true).await,
-            _ => Err(AppError::Config(format!(
-                "Unsupported conflict resolution action '{}'",
-                action
-            ))),
-        };
+        let result = with_operation_timeout(action, CLOUD_SYNC_OPERATION_TIMEOUT, async {
+            match action {
+                "upload_local" => self.push_snapshot("resolve_upload", true).await,
+                "download_remote" => self.pull_snapshot("resolve_download", true).await,
+                _ => Err(AppError::Config(format!(
+                    "Unsupported conflict resolution action '{}'",
+                    action
+                ))),
+            }
+        })
+        .await;
 
         match result {
             Ok(()) => {
@@ -245,10 +275,17 @@ impl CloudSyncManager {
     }
 
     pub async fn list_remote_backups(&self) -> AppResult<Vec<RemoteBackupEntry>> {
-        let settings = self.settings.lock().await.clone();
-        let operator = build_operator(&settings)?;
-        let index = load_backup_index(&operator, &settings.remote_root).await?;
-        Ok(index.entries)
+        with_operation_timeout(
+            "list_remote_backups",
+            CLOUD_SYNC_QUICK_OPERATION_TIMEOUT,
+            async {
+                let settings = self.settings.lock().await.clone();
+                let operator = build_operator(&settings)?;
+                let index = load_backup_index(&operator, &settings.remote_root).await?;
+                Ok(index.entries)
+            },
+        )
+        .await
     }
 
     pub async fn restore_remote_backup(
@@ -256,7 +293,12 @@ impl CloudSyncManager {
         revision: &str,
         trigger: &str,
     ) -> AppResult<()> {
-        let result = self.restore_remote_backup_inner(revision, trigger).await;
+        let result = with_operation_timeout(
+            trigger,
+            CLOUD_SYNC_OPERATION_TIMEOUT,
+            self.restore_remote_backup_inner(revision, trigger),
+        )
+        .await;
         if let Err(error) = &result {
             self.record_failure("backup", trigger, error).await;
         }
@@ -319,7 +361,18 @@ impl CloudSyncManager {
     }
 
     async fn startup_check(self: &Arc<Self>) -> AppResult<()> {
-        let _guard = self.operation_lock.lock().await;
+        let Ok(_guard) = self.operation_lock.try_lock() else {
+            self.set_status(
+                "idle",
+                "Startup cloud sync check skipped because another cloud sync operation is running"
+                    .to_string(),
+                None,
+                None,
+            )
+            .await;
+            tracing::info!("Startup cloud sync check skipped because another operation is running");
+            return Ok(());
+        };
         let settings = self.settings.lock().await.clone();
         if !settings.enabled {
             self.set_status("disabled", String::new(), None, None).await;
@@ -410,6 +463,18 @@ impl CloudSyncManager {
         self.set_status("idle", "Local changes pending sync".to_string(), None, None)
             .await;
         Ok(())
+    }
+
+    async fn handle_startup_check_failure(&self, error: AppError) {
+        if should_record_startup_check_failure(&error) {
+            self.record_failure("sync", "startup_check", &error).await;
+            tracing::warn!("Startup cloud sync check failed: {}", error);
+            return;
+        }
+
+        let message = format!("Startup cloud sync check skipped: {error}");
+        self.set_status("idle", message.clone(), None, None).await;
+        tracing::warn!("{}", message);
     }
 
     fn ensure_auto_push_worker(self: &Arc<Self>) {
@@ -913,8 +978,7 @@ impl CloudSyncManager {
             message: message.clone(),
         })
         .await;
-        self.set_status("failed", message, status.current_operation, status.conflict)
-            .await;
+        self.set_status("failed", message, None, None).await;
         self.record_automatic_retry_failure(trigger, error).await;
     }
 
@@ -965,9 +1029,7 @@ impl CloudSyncManager {
         current_operation: Option<String>,
         conflict: Option<CloudConflictPreview>,
     ) {
-        let Ok(app) = self.app() else {
-            return;
-        };
+        let app = self.app().ok();
         let settings = self.settings.lock().await.clone();
         let state = self.state.lock().await.clone();
         let status = CloudSyncStatus {
@@ -982,9 +1044,30 @@ impl CloudSyncManager {
             conflict: conflict.clone(),
         };
         *self.status.lock().await = status.clone();
-        let _ = app.emit("cloud-sync-status-changed", &status);
-        let _ = app.emit("cloud-sync-conflict", &conflict);
-        crate::tray::schedule_refresh(&app);
+        if let Some(app) = app {
+            let _ = app.emit("cloud-sync-status-changed", &status);
+            let _ = app.emit("cloud-sync-conflict", &conflict);
+            crate::tray::schedule_refresh(&app);
+        }
+    }
+
+    async fn set_status_after_settings_replace(&self, enabled: bool, provider: String) {
+        let app = self.app().ok();
+        let status = {
+            let mut status = self.status.lock().await;
+            status.enabled = enabled;
+            status.provider = provider;
+            status.state = if enabled { "idle" } else { "disabled" }.to_string();
+            status.message.clear();
+            status.current_operation = None;
+            status.conflict = None;
+            status.clone()
+        };
+        if let Some(app) = app {
+            let _ = app.emit("cloud-sync-status-changed", &status);
+            let _ = app.emit("cloud-sync-conflict", &Option::<CloudConflictPreview>::None);
+            crate::tray::schedule_refresh(&app);
+        }
     }
 
     fn app(&self) -> AppResult<tauri::AppHandle> {
@@ -995,12 +1078,38 @@ impl CloudSyncManager {
     }
 }
 
+async fn with_operation_timeout<T, F>(
+    operation: &str,
+    timeout_duration: Duration,
+    future: F,
+) -> AppResult<T>
+where
+    F: Future<Output = AppResult<T>>,
+{
+    tokio::time::timeout(timeout_duration, future)
+        .await
+        .map_err(|_| {
+            AppError::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "Cloud sync operation '{}' timed out after {} seconds",
+                    operation,
+                    timeout_duration.as_secs()
+                ),
+            ))
+        })?
+}
+
 fn is_automatic_trigger(trigger: &str) -> bool {
     matches!(trigger, "auto_push" | "scheduled_backup" | "startup_check")
 }
 
 fn is_non_retryable_automatic_error(error: &AppError) -> bool {
     matches!(error, AppError::Auth(_) | AppError::Config(_))
+}
+
+fn should_record_startup_check_failure(error: &AppError) -> bool {
+    !matches!(error, AppError::Io(_))
 }
 
 pub async fn notify_config_changed(app: &tauri::AppHandle) {
@@ -1064,5 +1173,86 @@ mod tests {
         assert!(is_automatic_trigger("startup_check"));
         assert!(!is_automatic_trigger("manual_push"));
         assert!(!is_automatic_trigger("manual_test_connection"));
+    }
+
+    #[tokio::test]
+    async fn record_failure_clears_current_operation() {
+        let manager = CloudSyncManager::new();
+        *manager.status.lock().await = CloudSyncStatus {
+            state: "running".to_string(),
+            current_operation: Some("sync_push".to_string()),
+            ..CloudSyncStatus::default()
+        };
+
+        manager
+            .record_failure(
+                "sync",
+                "manual_push",
+                &AppError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")),
+            )
+            .await;
+
+        let status = manager.status.lock().await.clone();
+        assert_eq!(status.state, "failed");
+        assert!(status.current_operation.is_none());
+    }
+
+    #[tokio::test]
+    async fn automatic_timeout_failure_uses_retry_backoff() {
+        let manager = CloudSyncManager::new();
+        let error = AppError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"));
+
+        manager
+            .record_automatic_retry_failure("auto_push", &error)
+            .await;
+
+        let retry = manager.automatic_retry.lock().await.clone();
+        assert!(!retry.suspended_until_settings_change);
+        assert!(retry.blocked_until_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn startup_check_skips_when_operation_lock_is_busy() {
+        let manager = Arc::new(CloudSyncManager::new());
+        let _guard = manager.operation_lock.lock().await;
+
+        manager
+            .startup_check()
+            .await
+            .expect("busy startup check should skip cleanly");
+
+        let status = manager.status.lock().await.clone();
+        assert_eq!(status.state, "idle");
+        assert!(status.message.contains("skipped"));
+    }
+
+    #[tokio::test]
+    async fn startup_io_failure_does_not_use_failure_history_or_retry_backoff() {
+        let manager = CloudSyncManager::new();
+        let error = AppError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout"));
+
+        manager.handle_startup_check_failure(error).await;
+
+        let status = manager.status.lock().await.clone();
+        assert_eq!(status.state, "idle");
+        assert!(status.message.contains("skipped"));
+
+        let retry = manager.automatic_retry.lock().await.clone();
+        assert_eq!(retry.consecutive_failures, 0);
+        assert!(retry.blocked_until_ms.is_none());
+        assert!(!retry.suspended_until_settings_change);
+    }
+
+    #[test]
+    fn startup_check_records_only_non_io_failures() {
+        assert!(!should_record_startup_check_failure(&AppError::Io(
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "timeout")
+        )));
+        assert!(should_record_startup_check_failure(&AppError::Config(
+            "bad cloud sync config".to_string()
+        )));
+        assert!(should_record_startup_check_failure(&AppError::Auth(
+            "bad credentials".to_string()
+        )));
     }
 }

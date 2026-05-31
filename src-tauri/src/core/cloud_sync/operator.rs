@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -126,6 +127,20 @@ pub(super) fn map_storage_error(error: opendal::Error) -> AppError {
         return AppError::Config(message);
     }
 
+    if is_storage_timeout_error(&raw) {
+        return AppError::Io(io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!("cloud storage operation timed out: {raw}"),
+        ));
+    }
+
+    if error.is_temporary() {
+        return AppError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!("temporary cloud storage error: {raw}"),
+        ));
+    }
+
     let label = match error.kind() {
         ErrorKind::NotFound => "not found",
         ErrorKind::PermissionDenied => "permission denied",
@@ -135,6 +150,14 @@ pub(super) fn map_storage_error(error: opendal::Error) -> AppError {
         _ => "unexpected error",
     };
     AppError::Config(format!("cloud storage {label}: {raw}"))
+}
+
+fn is_storage_timeout_error(raw: &str) -> bool {
+    let lower = raw.to_ascii_lowercase();
+    lower.contains("operation timeout")
+        || lower.contains("io timeout")
+        || lower.contains("timed out")
+        || lower.contains("deadline has elapsed")
 }
 
 fn map_webdav_auth_error(raw: &str) -> Option<String> {
@@ -458,5 +481,42 @@ mod tests {
         );
 
         assert!(message.is_none());
+    }
+
+    #[test]
+    fn timeout_storage_error_maps_to_retryable_io() {
+        let mapped = map_storage_error(
+            Error::new(ErrorKind::Unexpected, "operation timeout reached").set_temporary(),
+        );
+
+        match mapped {
+            AppError::Io(error) => assert_eq!(error.kind(), io::ErrorKind::TimedOut),
+            other => panic!("expected timeout IO error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn temporary_storage_error_maps_to_retryable_io() {
+        let mapped = map_storage_error(
+            Error::new(ErrorKind::Unexpected, "service temporarily unavailable").set_temporary(),
+        );
+
+        assert!(matches!(mapped, AppError::Io(_)));
+    }
+
+    #[test]
+    fn webdav_401_storage_error_stays_config_error() {
+        let mapped = map_storage_error(
+            Error::new(
+                ErrorKind::Unexpected,
+                "Unexpected at stat, context: { service: webdav, response: Parts { status: 401 } } => 401 Unauthorized",
+            )
+            .set_temporary(),
+        );
+
+        match mapped {
+            AppError::Config(message) => assert!(message.contains("WebDAV authentication failed")),
+            other => panic!("expected config auth error, got {other:?}"),
+        }
     }
 }
