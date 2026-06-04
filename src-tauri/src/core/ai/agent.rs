@@ -15,7 +15,7 @@ use crate::error::{AppError, AppResult};
 use super::history::{append_message, save_user_message};
 use super::model::{build_client, resolve_request_model};
 use super::parser::{extract_json_object, parse_model_output, trim_string_to_option};
-use super::prompt::{build_agent_prompt, build_observation_message, AGENT_SYSTEM_PROMPT};
+use super::prompt::{agent_system_prompt, build_agent_prompt, build_observation_message};
 use super::redaction::{redact_context, redact_sensitive_text};
 use super::stream::{active_streams, emit_stream_event, is_cancelled};
 use super::types::{
@@ -416,7 +416,9 @@ pub(super) async fn run_agent_stream(
         "AI agent stream resolved configuration"
     );
 
-    let mut conversation = vec![ChatMessage::system(AGENT_SYSTEM_PROMPT)];
+    let mut conversation = vec![ChatMessage::system(agent_system_prompt(
+        &request.options.language,
+    ))];
     let initial_prompt = build_agent_prompt(&request, &settings);
     conversation.push(ChatMessage::user(initial_prompt));
 
@@ -769,7 +771,8 @@ pub(super) async fn run_agent_stream(
                     *last = completed_step;
                 }
 
-                let obs_msg = build_observation_message(&obs, &command);
+                let obs_msg =
+                    build_observation_message(&obs, &command, &request.options.language);
                 conversation.push(ChatMessage::user(obs_msg));
             }
             other => {

@@ -330,7 +330,7 @@ pub(super) fn default_max_output_commands() -> u8 {
 }
 
 pub(super) fn default_language() -> String {
-    "zh-CN".to_string()
+    "en".to_string()
 }
 
 pub(super) fn default_safety_mode() -> String {

@@ -18,7 +18,7 @@ use super::model::{build_client, resolve_request_model};
 use super::parser::{
     extract_text_from_assistant, parse_model_output, trim_string_to_option, truncate_preview,
 };
-use super::prompt::{build_prompt, SYSTEM_PROMPT};
+use super::prompt::{build_prompt, system_prompt};
 use super::redaction::{redact_context, redact_sensitive_text};
 use super::types::{
     uuid, AiChatRequest, AiMessage, AiMessageRole, AiStreamEventPayload, AiStreamStart,
@@ -332,7 +332,7 @@ pub(super) async fn run_model_stream(
     let client = build_client(&resolved_model)?;
     let prompt = build_prompt(request, settings);
 
-    let mut messages = vec![ChatMessage::system(SYSTEM_PROMPT)];
+    let mut messages = vec![ChatMessage::system(system_prompt(&request.options.language))];
 
     if let Some(session_id) = &request.session_id {
         let max_turns = request.options.history_turns as usize;

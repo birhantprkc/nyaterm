@@ -565,6 +565,25 @@ export const DEFAULT_AI_SETTINGS: AISettings = {
   terminal_output_lines: 10,
 };
 
+function normalizeLocaleTag(value?: string | null): string | null {
+  if (!value) return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function normalizeAILocale(value?: string | null): string | null {
+  const normalized = normalizeLocaleTag(value);
+  if (!normalized) return null;
+  const lower = normalized.toLowerCase();
+  if (lower === "en" || lower.startsWith("en-")) return "en";
+  if (lower === "zh" || lower.startsWith("zh-")) return "zh-CN";
+  return normalized;
+}
+
+export function resolveAILanguage(uiLanguage?: string | null): string {
+  return normalizeAILocale(uiLanguage) ?? "en";
+}
+
 export function getEnabledAIModels(settings: AISettings) {
   return (settings.models ?? []).filter((model) => model.enabled);
 }

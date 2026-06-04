@@ -76,7 +76,12 @@ import { useApp } from "@/context/AppContext";
 import { useTheme } from "@/context/ThemeContext";
 import type { AIErrorDetectedDetail, AIOpenIntent } from "@/lib/aiEvents";
 import { AI_ERROR_DETECTED_EVENT } from "@/lib/aiEvents";
-import { getEnabledAIModels, getModelProviderLabel, selectDefaultAIModel } from "@/lib/aiSettings";
+import {
+  getEnabledAIModels,
+  getModelProviderLabel,
+  resolveAILanguage,
+  selectDefaultAIModel,
+} from "@/lib/aiSettings";
 import { getErrorMessage } from "@/lib/errors";
 import { invoke } from "@/lib/invoke";
 import { buildAIContext, getTerminalContextProvider } from "@/lib/terminalContext";
@@ -1270,6 +1275,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
           ? (savedConnections.find((c) => c.id === panes[0].connectionId) ?? null)
           : activeConnection;
 
+        const resolvedLanguage = resolveAILanguage(appSettings.ui.language);
         const result = await invoke<AIStreamStart>("start_ai_chat_stream", {
           request: {
             streamId: requestStreamId,
@@ -1284,7 +1290,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
             context,
             options: {
               maxOutputCommands: 2,
-              language: "zh-CN",
+              language: resolvedLanguage,
               safetyMode: "strict",
             },
           },
@@ -1312,6 +1318,7 @@ function AIAssistantPanel({ activePane, activeConnection, intent }: AIAssistantP
     [
       activeConnection,
       aiSettings.enabled,
+      appSettings.ui.language,
       appendAudit,
       buildMergedContext,
       cleanupStreamListener,
