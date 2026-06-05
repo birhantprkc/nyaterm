@@ -8,20 +8,22 @@ use http::{HeaderValue, Request, Response};
 use md5::{Digest as Md5Digest, Md5};
 use opendal::layers::{HttpClientLayer, RetryLayer, TimeoutLayer, TracingLayer};
 use opendal::raw::{HttpBody, HttpClient, HttpFetch};
-use opendal::services::{Webdav, S3};
+use opendal::services::{S3, Webdav};
 use opendal::{Buffer, Error, ErrorKind, Operator};
 use rand::RngCore;
 use sha2::Sha256;
 
 use crate::config::CloudSyncSettings;
 use crate::error::{AppError, AppResult};
+use crate::utils::url::normalize_storage_endpoint;
 
 use super::remote::remote_path;
 
 pub(super) fn build_operator(settings: &CloudSyncSettings) -> AppResult<Operator> {
     match settings.provider.as_str() {
         "webdav" => {
-            let mut builder = Webdav::default().endpoint(&settings.webdav.endpoint);
+            let endpoint = normalize_storage_endpoint(&settings.webdav.endpoint);
+            let mut builder = Webdav::default().endpoint(&endpoint);
             if !settings.webdav.root.trim().is_empty() {
                 builder = builder.root(&settings.webdav.root);
             }
@@ -54,8 +56,9 @@ pub(super) fn build_operator(settings: &CloudSyncSettings) -> AppResult<Operator
         }
         "s3" => {
             let mut builder = S3::default().bucket(&settings.s3.bucket);
-            if !settings.s3.endpoint.trim().is_empty() {
-                builder = builder.endpoint(&settings.s3.endpoint);
+            let endpoint = normalize_storage_endpoint(&settings.s3.endpoint);
+            if !endpoint.is_empty() {
+                builder = builder.endpoint(&endpoint);
             }
             if !settings.s3.region.trim().is_empty() {
                 builder = builder.region(&settings.s3.region);
@@ -427,6 +430,22 @@ mod tests {
         let message = message.unwrap();
         assert!(message.contains("WebDAV authentication failed"));
         assert!(!message.contains("currently supports"));
+    }
+
+    #[test]
+    fn cloud_storage_endpoint_accepts_trailing_slashes() {
+        assert_eq!(
+            normalize_storage_endpoint("https://dav.example.com/remote.php/webdav"),
+            "https://dav.example.com/remote.php/webdav"
+        );
+        assert_eq!(
+            normalize_storage_endpoint("https://dav.example.com/remote.php/webdav/"),
+            "https://dav.example.com/remote.php/webdav"
+        );
+        assert_eq!(
+            normalize_storage_endpoint(" https://s3.example.com// "),
+            "https://s3.example.com"
+        );
     }
 
     #[test]

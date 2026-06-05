@@ -7,10 +7,11 @@ use genai::{Client, ModelIden};
 use serde_json::Value;
 
 use crate::config::{
-    self, ai_model_id_for_credential, AiModelConfigItem, AiModelSource, AiProviderCredential,
-    AiProviderKind, AiSettings,
+    self, AiModelConfigItem, AiModelSource, AiProviderCredential, AiProviderKind, AiSettings,
+    ai_model_id_for_credential,
 };
 use crate::error::{AppError, AppResult};
+use crate::utils::url::{join_api_base_url, normalize_api_base_url};
 
 use super::types::{AiChatRequest, AiModelDiscovery};
 
@@ -193,7 +194,9 @@ pub(super) fn build_client(model: &ResolvedAiModel) -> AppResult<Client> {
     let base_url = model
         .credential
         .as_ref()
-        .and_then(|credential| credential.base_url.clone())
+        .and_then(|credential| credential.base_url.as_deref())
+        .map(normalize_api_base_url)
+        .transpose()?
         .filter(|value| !value.trim().is_empty());
 
     let resolver =
@@ -248,7 +251,6 @@ pub async fn list_model_names(app: &tauri::AppHandle) -> AppResult<Vec<AiModelDi
             .as_deref()
             .unwrap_or("")
             .trim()
-            .trim_end_matches('/')
             .to_string();
         if base_url.is_empty() {
             continue;
@@ -307,7 +309,7 @@ async fn fetch_openai_compatible_models(
     base_url: &str,
     api_key: Option<&str>,
 ) -> AppResult<Vec<String>> {
-    let url = format!("{base_url}/models");
+    let url = openai_compatible_models_url(base_url)?;
     let client = reqwest::Client::new();
     let mut req = client.get(&url);
     if let Some(key) = api_key {
@@ -338,4 +340,37 @@ async fn fetch_openai_compatible_models(
         })
         .unwrap_or_default();
     Ok(names)
+}
+
+fn openai_compatible_models_url(base_url: &str) -> AppResult<String> {
+    join_api_base_url(base_url, "models")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_compatible_models_url_accepts_missing_trailing_slash() {
+        assert_eq!(
+            openai_compatible_models_url("https://api.example.com/v1").unwrap(),
+            "https://api.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_models_url_accepts_trailing_slash() {
+        assert_eq!(
+            openai_compatible_models_url("https://api.example.com/v1/").unwrap(),
+            "https://api.example.com/v1/models"
+        );
+    }
+
+    #[test]
+    fn openai_compatible_models_url_preserves_query() {
+        assert_eq!(
+            openai_compatible_models_url("https://api.example.com/v1?api-version=1").unwrap(),
+            "https://api.example.com/v1/models?api-version=1"
+        );
+    }
 }
