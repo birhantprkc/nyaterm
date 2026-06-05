@@ -145,6 +145,28 @@ export default function AppLayout({
     }),
     [effectiveAppearance, theme.colors],
   );
+  const hasLeftActivityItems =
+    leftActivityBar.items.length > 0 || (leftActivityBar.bottomItems?.length ?? 0) > 0;
+  const hasRightActivityItems =
+    rightActivityBar.items.length > 0 || (rightActivityBar.bottomItems?.length ?? 0) > 0;
+  const leftMobileOpen = hasLeftActivityItems && mobile.leftOpen;
+  const rightMobileOpen = hasRightActivityItems && mobile.rightOpen;
+
+  useEffect(() => {
+    if (!hasLeftActivityItems && mobile.leftOpen) {
+      mobile.setLeftOpen(false);
+    }
+    if (!hasRightActivityItems && mobile.rightOpen) {
+      mobile.setRightOpen(false);
+    }
+  }, [
+    hasLeftActivityItems,
+    hasRightActivityItems,
+    mobile.leftOpen,
+    mobile.rightOpen,
+    mobile.setLeftOpen,
+    mobile.setRightOpen,
+  ]);
 
   return (
     <div
@@ -162,12 +184,16 @@ export default function AppLayout({
       <div className="relative z-10 flex h-full min-h-0 flex-col">
         <Header
           {...header}
-          onToggleLeft={() => mobile.setLeftOpen(!mobile.leftOpen)}
-          onToggleRight={() => mobile.setRightOpen(!mobile.rightOpen)}
+          onToggleLeft={() => {
+            if (hasLeftActivityItems) mobile.setLeftOpen(!mobile.leftOpen);
+          }}
+          onToggleRight={() => {
+            if (hasRightActivityItems) mobile.setRightOpen(!mobile.rightOpen);
+          }}
         />
 
         <main className="flex-1 flex overflow-hidden relative">
-          {!isMacOS && (mobile.leftOpen || mobile.rightOpen) && (
+          {!isMacOS && (leftMobileOpen || rightMobileOpen) && (
             <div
               className="absolute inset-0 bg-black/50 z-40 lg:hidden"
               onClick={() => {
@@ -177,13 +203,15 @@ export default function AppLayout({
             />
           )}
 
-          <ActivityBar
-            {...leftActivityBar}
-            side="left"
-            zone={{ top: "left_top", bottom: "left_bottom" }}
-          />
+          {hasLeftActivityItems && (
+            <ActivityBar
+              {...leftActivityBar}
+              side="left"
+              zone={{ top: "left_top", bottom: "left_bottom" }}
+            />
+          )}
 
-          {uiConfig.active_left_panel && (
+          {hasLeftActivityItems && uiConfig.active_left_panel && (
             <>
               <div
                 style={{ width: uiConfig.left_width, backgroundColor: "var(--df-bg-panel)" }}
@@ -194,7 +222,7 @@ export default function AppLayout({
                     fixed inset-y-0 left-10 z-40 flex flex-col shadow-xl transition-transform duration-200
                     lg:relative lg:left-0 lg:translate-x-0 lg:z-0 lg:shadow-none
                     ${
-                      mobile.leftOpen
+                      leftMobileOpen
                         ? "translate-x-0"
                         : "-translate-x-[calc(100%+2.5rem)] lg:translate-x-0"
                     }
@@ -304,7 +332,7 @@ export default function AppLayout({
             )}
           </section>
 
-          {uiConfig.active_right_panel && (
+          {hasRightActivityItems && uiConfig.active_right_panel && (
             <>
               <ResizeHandle
                 direction="horizontal"
@@ -324,7 +352,7 @@ export default function AppLayout({
                     fixed inset-y-0 right-10 z-50 flex flex-col shadow-xl transition-transform duration-200 border-l
                     md:relative md:right-0 md:translate-x-0 md:z-0 md:shadow-none
                     ${
-                      mobile.rightOpen
+                      rightMobileOpen
                         ? "translate-x-0"
                         : "translate-x-[calc(100%+2.5rem)] md:translate-x-0"
                     }
@@ -352,11 +380,13 @@ export default function AppLayout({
             </>
           )}
 
-          <ActivityBar
-            {...rightActivityBar}
-            side="right"
-            zone={{ top: "right_top", bottom: "right_bottom" }}
-          />
+          {hasRightActivityItems && (
+            <ActivityBar
+              {...rightActivityBar}
+              side="right"
+              zone={{ top: "right_top", bottom: "right_bottom" }}
+            />
+          )}
         </main>
 
         <AboutDialog open={dialogs.aboutOpen} onClose={() => dialogs.onAboutOpenChange(false)} />
