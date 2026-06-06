@@ -265,6 +265,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
     left_width: 256,
     right_width: 288,
     quick_cmd_height: 180,
+    quick_cmd_view_mode: "list",
     active_left_panel: "fileExplorer",
     active_right_panel: "savedConnections",
     show_quick_cmd_bar: true,
