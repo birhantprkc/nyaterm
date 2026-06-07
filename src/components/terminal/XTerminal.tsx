@@ -43,7 +43,7 @@ import {
   resyncFromTerminalLine,
 } from "@/lib/terminalInputTracker";
 import { XTERM_PERFORMANCE_CONFIG } from "@/lib/xtermPerformance";
-import type { AiCaptureEvent } from "@/types/global";
+import type { AiCaptureEvent, SessionType } from "@/types/global";
 import ActionLinkMenu from "./ActionLinkMenu";
 import ActionLinkTooltip from "./ActionLinkTooltip";
 import CommandSuggestions from "./CommandSuggestions";
@@ -67,6 +67,16 @@ import { createTerminalLinkHandlers } from "./terminalLinkHandlers";
 import type { PerformanceMode, PerformanceOverlayState, XTerminalProps } from "./xterminalTypes";
 import { createZmodemEventHandler, type ZmodemEventPayload } from "./zmodemTerminalEvents";
 import "@xterm/xterm/css/xterm.css";
+
+const BACKSPACE_INPUT = "\x7f";
+
+function isLocalBackspaceEvent(event: KeyboardEvent, sessionType: SessionType): boolean {
+  if (sessionType !== "Local" || event.ctrlKey || event.metaKey || event.altKey) {
+    return false;
+  }
+
+  return event.key === "Backspace" || (event.key === "Delete" && event.code === "Backspace");
+}
 
 /**
  * xterm.js terminal for a session. Handles OSC 133 shell integration (or fallback prompt
@@ -566,6 +576,20 @@ export default function XTerminal({
             pasteText(text);
           })
           .catch(() => {});
+        return false;
+      }
+
+      if (isLocalBackspaceEvent(e, sessionTypeRef.current)) {
+        e.preventDefault();
+        const selectedInputRange = getSelectedInputRange(terminal, inputStateRef.current);
+        if (selectedInputRange) {
+          deleteInputSelection(selectedInputRange);
+          return false;
+        }
+
+        inputStateRef.current = applyTerminalInputData(inputStateRef.current, BACKSPACE_INPUT);
+        syncSuggestionsWithInputState();
+        sendRawInput(BACKSPACE_INPUT, null);
         return false;
       }
 
