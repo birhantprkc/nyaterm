@@ -199,6 +199,8 @@ pub struct UiConfig {
     pub quick_cmd_height: f64,
     #[serde(default = "default_quick_cmd_view_mode")]
     pub quick_cmd_view_mode: String,
+    #[serde(default = "default_quick_cmd_sort_mode")]
+    pub quick_cmd_sort_mode: String,
     #[serde(default = "default_active_left_panel")]
     pub active_left_panel: Option<String>,
     #[serde(default = "default_active_right_panel")]
@@ -244,7 +246,11 @@ fn default_quick_cmd_height() -> f64 {
 }
 
 fn default_quick_cmd_view_mode() -> String {
-    "list".to_string()
+    "tile".to_string()
+}
+
+fn default_quick_cmd_sort_mode() -> String {
+    "created".to_string()
 }
 
 fn default_active_left_panel() -> Option<String> {
@@ -291,6 +297,7 @@ impl Default for UiConfig {
             right_width: default_right_width(),
             quick_cmd_height: default_quick_cmd_height(),
             quick_cmd_view_mode: default_quick_cmd_view_mode(),
+            quick_cmd_sort_mode: default_quick_cmd_sort_mode(),
             active_left_panel: default_active_left_panel(),
             active_right_panel: default_active_right_panel(),
             show_quick_cmd_bar: true,

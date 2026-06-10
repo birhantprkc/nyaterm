@@ -296,6 +296,7 @@ export interface ActivityBarLayout {
 
 /** Layout preferences: panel widths, active panels, theme. */
 export type QuickCommandViewMode = "list" | "compact" | "tile";
+export type QuickCommandSortMode = "created" | "name" | "useCount";
 
 export interface UiConfig {
   open_tabs: RestorableTab[];
@@ -303,6 +304,7 @@ export interface UiConfig {
   right_width: number;
   quick_cmd_height: number;
   quick_cmd_view_mode: QuickCommandViewMode;
+  quick_cmd_sort_mode?: QuickCommandSortMode;
   /** ID of whichever panel is currently open on the left side. */
   active_left_panel: string | null;
   /** ID of whichever panel is currently open on the right side. */
