@@ -1,4 +1,13 @@
-import { type DragEvent, type ReactNode, useCallback, useRef, useState } from "react";
+import {
+  type DragEvent,
+  type MutableRefObject,
+  type PointerEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import {
   HiMiniArrowTurnLeftDown,
@@ -27,6 +36,52 @@ export interface ActivityBarItem {
 }
 
 const DRAG_MIME = "application/x-nyaterm-activity";
+const POINTER_DRAG_THRESHOLD_PX = 4;
+
+interface PointerActivityDragState {
+  itemId: string;
+  sourceZone: ActivityBarZone;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  dragging: boolean;
+}
+
+interface ActivityDropZoneRegistryEntry {
+  zoneKey: "top" | "bottom";
+  items: ActivityBarItem[];
+  onReorder: (zone: "top" | "bottom", orderedIds: string[]) => void;
+  onMoveItem: (itemId: string, targetZone: ActivityBarZone) => void;
+}
+
+const activityDropZones = new Map<ActivityBarZone, ActivityDropZoneRegistryEntry>();
+
+function shouldUsePointerActivityDrag() {
+  if (typeof navigator === "undefined") return false;
+  return /Mac/.test(navigator.platform) && /AppleWebKit/.test(navigator.userAgent);
+}
+
+function resolvePointerDropTarget(clientX: number, clientY: number) {
+  const elements = document.elementsFromPoint(clientX, clientY);
+  for (const element of elements) {
+    const target = element.closest<HTMLElement>(
+      "[data-activity-drop-zone][data-activity-drop-index]",
+    );
+    if (!target) continue;
+
+    const targetZone = target.dataset.activityDropZone as ActivityBarZone | undefined;
+    const baseIndex = Number(target.dataset.activityDropIndex);
+    if (!targetZone || !Number.isFinite(baseIndex)) continue;
+
+    const rect = target.getBoundingClientRect();
+    const isEndTarget = target.dataset.activityDropEnd === "true";
+    const targetIndex =
+      isEndTarget || clientY < rect.top + rect.height / 2 ? baseIndex : baseIndex + 1;
+    return { targetZone, targetIndex };
+  }
+
+  return null;
+}
 
 const ZONE_LABELS: { zone: ActivityBarZone; key: string; icon: ReactNode }[] = [
   { zone: "left_top", key: "activityBar.leftTop", icon: <HiMiniArrowTurnLeftUp /> },
@@ -145,6 +200,124 @@ function DropZone({
 }: DropZoneProps) {
   const [dropIndex, setDropIndex] = useState<number | null>(null);
   const dragItemIdRef = useRef<string | null>(null);
+  const pointerDragRef = useRef<PointerActivityDragState | null>(null);
+  const suppressClickRef = useRef(false);
+  const usePointerDrag = shouldUsePointerActivityDrag();
+
+  useEffect(() => {
+    activityDropZones.set(zoneName, { zoneKey, items, onReorder, onMoveItem });
+    return () => {
+      activityDropZones.delete(zoneName);
+    };
+  }, [items, onMoveItem, onReorder, zoneKey, zoneName]);
+
+  const resetDragState = useCallback(() => {
+    setDropIndex(null);
+    dragItemIdRef.current = null;
+    pointerDragRef.current = null;
+  }, []);
+
+  const requestPointerDrop = useCallback(
+    (state: PointerActivityDragState, targetZone: ActivityBarZone, targetIndex: number) => {
+      const targetEntry = activityDropZones.get(targetZone);
+      if (!targetEntry) {
+        resetDragState();
+        return;
+      }
+
+      if (targetZone !== state.sourceZone) {
+        targetEntry.onMoveItem(state.itemId, targetZone);
+        resetDragState();
+        return;
+      }
+
+      const currentIds = targetEntry.items.map((item) => item.id);
+      const fromIdx = currentIds.indexOf(state.itemId);
+      if (fromIdx === -1) {
+        resetDragState();
+        return;
+      }
+
+      const reordered = [...currentIds];
+      reordered.splice(fromIdx, 1);
+      const insertAt = Math.max(
+        0,
+        Math.min(reordered.length, targetIndex > fromIdx ? targetIndex - 1 : targetIndex),
+      );
+      reordered.splice(insertAt, 0, state.itemId);
+      targetEntry.onReorder(targetEntry.zoneKey, reordered);
+      resetDragState();
+    },
+    [resetDragState],
+  );
+
+  const handlePointerDown = useCallback(
+    (event: PointerEvent, itemId: string) => {
+      if (!usePointerDrag) return;
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) {
+        return;
+      }
+
+      pointerDragRef.current = {
+        itemId,
+        sourceZone: zoneName,
+        pointerId: event.pointerId,
+        startX: event.clientX,
+        startY: event.clientY,
+        dragging: false,
+      };
+      event.currentTarget.setPointerCapture(event.pointerId);
+    },
+    [usePointerDrag, zoneName],
+  );
+
+  const handlePointerMove = useCallback(
+    (event: PointerEvent) => {
+      const state = pointerDragRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+
+      const moved =
+        Math.abs(event.clientX - state.startX) >= POINTER_DRAG_THRESHOLD_PX ||
+        Math.abs(event.clientY - state.startY) >= POINTER_DRAG_THRESHOLD_PX;
+      if (!state.dragging) {
+        if (!moved) return;
+        state.dragging = true;
+        suppressClickRef.current = true;
+        dragItemIdRef.current = state.itemId;
+      }
+
+      const target = resolvePointerDropTarget(event.clientX, event.clientY);
+      setDropIndex(target?.targetZone === zoneName ? target.targetIndex : null);
+      event.preventDefault();
+    },
+    [zoneName],
+  );
+
+  const handlePointerEnd = useCallback(
+    (event: PointerEvent) => {
+      const state = pointerDragRef.current;
+      if (!state || state.pointerId !== event.pointerId) return;
+      pointerDragRef.current = null;
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+
+      dragItemIdRef.current = null;
+      if (!state.dragging) return;
+
+      const target = resolvePointerDropTarget(event.clientX, event.clientY);
+      if (target) {
+        requestPointerDrop(state, target.targetZone, target.targetIndex);
+      } else {
+        resetDragState();
+      }
+      event.preventDefault();
+      window.setTimeout(() => {
+        suppressClickRef.current = false;
+      }, 0);
+    },
+    [requestPointerDrop, resetDragState],
+  );
 
   const handleDragStart = useCallback(
     (e: DragEvent, itemId: string) => {
@@ -194,9 +367,8 @@ function DropZone({
   );
 
   const handleDragEnd = useCallback(() => {
-    setDropIndex(null);
-    dragItemIdRef.current = null;
-  }, []);
+    resetDragState();
+  }, [resetDragState]);
 
   return (
     <div className={className} onDragLeave={handleDragLeave}>
@@ -212,16 +384,26 @@ function DropZone({
           currentZone={zoneName}
           onMoveItem={onMoveItem}
           onToggleLabel={onToggleLabel}
+          dropZoneName={zoneName}
+          dropIndex={idx}
           onDragStart={(e) => handleDragStart(e, item.id)}
           onDragOver={(e) => handleDragOver(e, idx)}
           onDrop={(e) => handleDrop(e, idx)}
           onDragEnd={handleDragEnd}
+          onPointerDown={(e) => handlePointerDown(e, item.id)}
+          onPointerMove={handlePointerMove}
+          onPointerEnd={handlePointerEnd}
+          draggable={!usePointerDrag}
+          suppressClickRef={suppressClickRef}
           showDropIndicator={dropIndex === idx}
         />
       ))}
       {/* Drop target after last item */}
       <div
         className="w-full h-1"
+        data-activity-drop-zone={zoneName}
+        data-activity-drop-index={items.length}
+        data-activity-drop-end="true"
         onDragOver={(e) => handleDragOver(e, items.length)}
         onDrop={(e) => handleDrop(e, items.length)}
       />
@@ -239,10 +421,17 @@ function ActivityBarButton({
   currentZone,
   onMoveItem,
   onToggleLabel,
+  dropZoneName,
+  dropIndex,
   onDragStart,
   onDragOver,
   onDrop,
   onDragEnd,
+  onPointerDown,
+  onPointerMove,
+  onPointerEnd,
+  draggable,
+  suppressClickRef,
   showDropIndicator,
 }: {
   item: ActivityBarItem;
@@ -254,10 +443,17 @@ function ActivityBarButton({
   currentZone: ActivityBarZone;
   onMoveItem: (itemId: string, targetZone: ActivityBarZone) => void;
   onToggleLabel: () => void;
+  dropZoneName: ActivityBarZone;
+  dropIndex: number;
   onDragStart: (e: DragEvent) => void;
   onDragOver: (e: DragEvent) => void;
   onDrop: (e: DragEvent) => void;
   onDragEnd: () => void;
+  onPointerDown: (e: PointerEvent) => void;
+  onPointerMove: (e: PointerEvent) => void;
+  onPointerEnd: (e: PointerEvent) => void;
+  draggable: boolean;
+  suppressClickRef: MutableRefObject<boolean>;
   showDropIndicator: boolean;
 }) {
   const { t } = useTranslation();
@@ -268,17 +464,29 @@ function ActivityBarButton({
         <ContextMenuTrigger asChild>
           <TooltipTrigger asChild>
             <button
-              draggable
+              draggable={draggable}
+              data-activity-drop-zone={dropZoneName}
+              data-activity-drop-index={dropIndex}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDrop={onDrop}
               onDragEnd={onDragEnd}
+              onPointerDown={onPointerDown}
+              onPointerMove={onPointerMove}
+              onPointerUp={onPointerEnd}
+              onPointerCancel={onPointerEnd}
               className={`relative flex flex-col items-center justify-center w-full transition-colors ${showLabel ? "min-h-12 gap-0.5 py-1" : "h-9"}`}
               style={{
                 color: active ? "var(--df-primary)" : "var(--df-text-muted)",
                 cursor: "default",
               }}
-              onClick={() => onSelect(item.id)}
+              onClick={() => {
+                if (suppressClickRef.current) {
+                  suppressClickRef.current = false;
+                  return;
+                }
+                onSelect(item.id);
+              }}
             >
               {showDropIndicator && (
                 <span

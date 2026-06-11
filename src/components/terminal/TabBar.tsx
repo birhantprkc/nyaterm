@@ -202,6 +202,8 @@ function TabBar({
   const [suppressOverflowTooltip, setSuppressOverflowTooltip] = useState(false);
   const tabStripRef = useRef<HTMLDivElement | null>(null);
   const tabMeasureRefs = useRef(new Map<string, HTMLDivElement>());
+  const tabButtonRefs = useRef(new Map<string, HTMLDivElement>());
+  const draggedTabIdRef = useRef<string | null>(null);
   const [visibleTabIds, setVisibleTabIds] = useState<string[]>(() => tabs.map((tab) => tab.id));
 
   const groupsById = useMemo(
@@ -338,6 +340,7 @@ function TabBar({
   }, []);
 
   const resetDragState = useCallback(() => {
+    draggedTabIdRef.current = null;
     setDraggedTabId(null);
     setDropIndex(null);
   }, []);
@@ -350,10 +353,34 @@ function TabBar({
     }
   }, []);
 
+  const setVisibleTabRef = useCallback((tabId: string, element: HTMLDivElement | null) => {
+    if (element) {
+      tabButtonRefs.current.set(tabId, element);
+    } else {
+      tabButtonRefs.current.delete(tabId);
+    }
+  }, []);
+
+  const getInsertionIndexFromClientX = useCallback(
+    (clientX: number) => {
+      for (const tab of visibleTabs) {
+        const element = tabButtonRefs.current.get(tab.id);
+        if (!element) continue;
+        const rect = element.getBoundingClientRect();
+        const tabIndex = tabs.findIndex((item) => item.id === tab.id);
+        if (tabIndex === -1) continue;
+        if (clientX < rect.left + rect.width / 2) return tabIndex;
+        if (clientX <= rect.right) return tabIndex + 1;
+      }
+      return tabs.length;
+    },
+    [tabs, visibleTabs],
+  );
+
   const handleDropAtIndex = useCallback(
     (insertionIndex: number, event?: DragEvent<HTMLDivElement>) => {
       const externalTabId = event?.dataTransfer.getData("application/nyaterm-tab");
-      const effectiveTabId = draggedTabId || externalTabId;
+      const effectiveTabId = draggedTabIdRef.current || draggedTabId || externalTabId;
       if (!effectiveTabId) return;
 
       const fromIndex = tabs.findIndex((tab) => tab.id === effectiveTabId);
@@ -382,8 +409,30 @@ function TabBar({
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData("text/plain", tabId);
     event.dataTransfer.setData("application/nyaterm-tab", tabId);
+    draggedTabIdRef.current = tabId;
     setDraggedTabId(tabId);
     setDropIndex(tabs.findIndex((tab) => tab.id === tabId));
+  };
+
+  const handleDragEnd = (event: DragEvent<HTMLDivElement>) => {
+    const fallbackTabId = draggedTabIdRef.current;
+    const strip = tabStripRef.current;
+    if (fallbackTabId && strip && event.clientX !== 0) {
+      const rect = strip.getBoundingClientRect();
+      const horizontalTolerance = 48;
+      const isNearTabStrip =
+        event.clientX >= rect.left - horizontalTolerance &&
+        event.clientX <= rect.right + horizontalTolerance;
+      if (isNearTabStrip) {
+        handleDropAtIndex(getInsertionIndexFromClientX(event.clientX));
+        return;
+      }
+    }
+
+    resetDragState();
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
+    });
   };
 
   const renderTabIcon = (tab: Tab) => {
@@ -495,7 +544,11 @@ function TabBar({
 
     const tabButton = (
       <div
-        ref={measureOnly ? (element) => setMeasureTabRef(tab.id, element) : undefined}
+        ref={
+          measureOnly
+            ? (element) => setMeasureTabRef(tab.id, element)
+            : (element) => setVisibleTabRef(tab.id, element)
+        }
         draggable={!measureOnly}
         className={`group relative flex items-center gap-2 border-r pl-3 pr-2 text-xs transition-[color,background-color,opacity] duration-200 ${
           isActive ? "font-semibold" : "font-medium df-hover"
@@ -517,11 +570,8 @@ function TabBar({
         onDragEnd={
           measureOnly
             ? undefined
-            : () => {
-                resetDragState();
-                requestAnimationFrame(() => {
-                  window.dispatchEvent(new CustomEvent("nyaterm:refresh-terminals"));
-                });
+            : (event) => {
+                handleDragEnd(event);
               }
         }
         onDragOver={
