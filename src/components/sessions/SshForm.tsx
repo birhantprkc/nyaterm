@@ -256,7 +256,6 @@ export function SshForm({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showDirectPassword, setShowDirectPassword] = useState(false);
   const [directPasswordLoading, setDirectPasswordLoading] = useState(false);
-  const [secretsUnlocked, setSecretsUnlocked] = useState(false);
   const [passwordSource, setPasswordSource] = useState<"direct" | "saved">(
     passwordId ? "saved" : "direct",
   );
@@ -896,12 +895,7 @@ export function SshForm({
             <DialogDescription className="sr-only">{t("passwordManager.title")}</DialogDescription>
           </DialogHeader>
           <div className="overflow-y-auto px-1 pb-1">
-            <PasswordManagementTab
-              secretsUnlocked={secretsUnlocked}
-              onLockSecrets={() => setSecretsUnlocked(false)}
-              onUnlockSecrets={() => setSecretsUnlocked(true)}
-              showSecretUnlockFooter
-            />
+            <PasswordManagementTab />
           </div>
         </DialogContent>
       </Dialog>

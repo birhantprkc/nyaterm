@@ -278,7 +278,9 @@ export function PasswordManagementTab({
     }
   }, [onUnlockSecrets]);
 
-  const lockedHint = !secretsUnlocked ? t("secretUnlock.lockedActionHint") : undefined;
+  const lockedHint = !secretsUnlocked
+    ? t(showSecretUnlockFooter ? "secretUnlock.lockedActionHint" : "secretUnlock.unlockTitle")
+    : undefined;
 
   const rootClassName = showSecretUnlockFooter ? "flex min-h-0 flex-1 flex-col" : "space-y-6";
   const contentClassName = showSecretUnlockFooter
@@ -329,7 +331,11 @@ export function PasswordManagementTab({
                           variant="ghost"
                           size="icon-sm"
                           onClick={() => {
-                            runUnlockedAction(() => handleToggleReveal(entry.id));
+                            if (revealedIds.has(entry.id)) {
+                              void handleToggleReveal(entry.id);
+                            } else {
+                              runUnlockedAction(() => handleToggleReveal(entry.id));
+                            }
                           }}
                           disabled={editingId !== null || revealLoadingIds.has(entry.id)}
                           aria-label={
@@ -434,7 +440,15 @@ export function PasswordManagementTab({
           onUnlocked={handleSecretsUnlocked}
           unlockRequestNonce={unlockRequestNonce}
         />
-      ) : null}
+      ) : (
+        <SecretUnlockFooter
+          unlocked={secretsUnlocked}
+          onLock={onLockSecrets ?? (() => {})}
+          onUnlocked={handleSecretsUnlocked}
+          showTrigger={false}
+          unlockRequestNonce={unlockRequestNonce}
+        />
+      )}
 
       <Dialog open={deletingEntry !== null} onOpenChange={(v) => !v && setDeletingEntry(null)}>
         <DialogContent showCloseButton={false} className="max-w-xs">
