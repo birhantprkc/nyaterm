@@ -463,7 +463,7 @@ function EmptyWorkspaceState({
   onShowCommands: () => void;
   onSwitchTerminal: () => void;
 }) {
-  const items = [
+  const emptyWorkspaceActions = [
     {
       label: t("app.openChat"),
       shortcut: openChatShortcut,
@@ -499,8 +499,8 @@ function EmptyWorkspaceState({
           }}
         />
 
-        <div className="grid w-full max-w-[30rem] grid-cols-[minmax(0,1fr)_auto] gap-x-12 gap-y-3 text-sm">
-          {items.map((item) => (
+        <div className="grid w-fit max-w-[30rem] grid-cols-[max-content_auto] gap-x-4 gap-y-3 text-sm">
+          {emptyWorkspaceActions.map((item) => (
             <button
               key={item.label}
               type="button"
