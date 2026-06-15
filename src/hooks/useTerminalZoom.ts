@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef } from "react";
+import { resolveShortcutKeys } from "@/hooks/useShortcutMap";
+import { matchesKeyEvent } from "@/lib/shortcutRegistry";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
   decreaseTerminalFontSize,
@@ -12,7 +14,10 @@ type UpdateAppSettings = (
 
 const CTRL_WHEEL_ZOOM_THROTTLE_MS = 50;
 
-export function useTerminalZoom(updateAppSettings: UpdateAppSettings) {
+export function useTerminalZoom(
+  updateAppSettings: UpdateAppSettings,
+  keybindings: Record<string, string> = {},
+) {
   const lastCtrlWheelZoomAtRef = useRef(0);
 
   const handleZoomIn = useCallback(() => {
@@ -38,6 +43,35 @@ export function useTerminalZoom(updateAppSettings: UpdateAppSettings) {
       appearance: { ...prev.appearance, font_size: DEFAULT_TERMINAL_FONT_SIZE },
     }));
   }, [updateAppSettings]);
+
+  useEffect(() => {
+    const handleKeyboardZoom = (event: KeyboardEvent) => {
+      if (matchesKeyEvent(resolveShortcutKeys("view.zoomIn", keybindings), event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        handleZoomIn();
+        return;
+      }
+
+      if (matchesKeyEvent(resolveShortcutKeys("view.zoomOut", keybindings), event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        handleZoomOut();
+        return;
+      }
+
+      if (matchesKeyEvent(resolveShortcutKeys("view.resetZoom", keybindings), event)) {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        handleResetZoom();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyboardZoom, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyboardZoom, true);
+    };
+  }, [handleResetZoom, handleZoomIn, handleZoomOut, keybindings]);
 
   useEffect(() => {
     const handleCtrlWheelZoom = (event: WheelEvent) => {

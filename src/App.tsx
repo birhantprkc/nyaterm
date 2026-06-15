@@ -1103,7 +1103,10 @@ function App() {
     });
   }, [multiPanelOpen, updateUi]);
 
-  const { handleZoomIn, handleZoomOut, handleResetZoom } = useTerminalZoom(updateAppSettings);
+  const { handleZoomIn, handleZoomOut, handleResetZoom } = useTerminalZoom(
+    updateAppSettings,
+    appSettings.keybindings,
+  );
 
   const handleOpenSettings = useCallback(() => {
     openSettings();
