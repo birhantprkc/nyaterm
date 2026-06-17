@@ -445,11 +445,6 @@ export default function SendCommandPanel({
         if (failedCount > 0) {
           toast.error(t("serialSend.sendPartial", "Some sessions did not receive the data"));
         }
-        if (dataType === "hex") {
-          setHexText("");
-        } else {
-          setCommandText("");
-        }
       }
     } finally {
       if (timerRef.current !== null) {
