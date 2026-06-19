@@ -104,6 +104,23 @@ Common uses:
 
 The command is sent as terminal input after login, so it behaves exactly like typing the command yourself.
 
+### X11 forwarding
+
+X11 Forwarding allows remote graphical applications to display on your local machine through SSH.
+
+NyaTerm does not include an X server. You need to install and start one:
+
+- Windows: VcXsrv or Xming
+- macOS: XQuartz
+- Linux: Xorg or Xwayland
+
+Remote server requirements:
+
+- `sshd_config`: `X11Forwarding yes`
+- `xauth` installed
+
+If you need to override the local DISPLAY value, set **Settings → Terminal → Local X11 DISPLAY**. Common values are `localhost:0` on Windows and `:0` on Linux/macOS.
+
 ### Multiplexed SSH sessions
 
 NyaTerm can multiplex multiple terminal sessions over a single SSH connection. Opening additional terminals to the same host reuses the existing authenticated connection instead of re-authenticating each time.
