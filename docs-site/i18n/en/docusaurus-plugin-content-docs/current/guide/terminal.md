@@ -113,6 +113,34 @@ You can define your own rules with:
 - One matching pattern per line
 - An option to continue matching across wrapped lines
 
+#### Import custom highlight rules
+
+In **Settings → Terminal → Custom Rules**, click **Import** to import custom highlight rules from a JSON file.
+
+Imports merge into your existing rules and do not clear the list:
+
+- Rules with the same `id` are updated
+- Rules with new `id` values are appended
+- Empty `id` values are generated automatically
+- Rules with an empty `name` or no valid `patterns` are skipped
+
+The recommended JSON shape is below. A top-level rules array is also supported.
+
+```json
+{
+  "keyword_highlights": [
+    {
+      "id": "deploy-errors",
+      "name": "Deploy Errors",
+      "patterns": ["deploy failed", "rollback required", "fatal"],
+      "color_dark": "#ff7b72",
+      "color_light": "#cf222e",
+      "enabled": true
+    }
+  ]
+}
+```
+
 ### Large-output protection
 
 When a session produces too much output too quickly, NyaTerm can enter a temporary protection mode so the terminal remains responsive.

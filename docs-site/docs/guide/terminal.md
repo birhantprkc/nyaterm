@@ -161,6 +161,34 @@ NyaTerm 可以在你手动输入命令时进行实时风险评估。当检测到
 - 每行填写一个匹配模式
 - 可选择是否跨折行继续匹配
 
+#### 导入自定义高亮规则
+
+在 **设置 → 终端 → 自定义规则** 中点击 **导入**，可以从 JSON 文件导入自定义高亮规则。
+
+导入会和现有规则合并，不会清空已有列表：
+
+- 相同 `id` 的规则会被更新
+- 不存在的 `id` 会追加为新规则
+- `id` 为空时会自动生成
+- `name` 为空或没有有效 `patterns` 的规则会被跳过
+
+推荐的 JSON 结构如下，也兼容直接使用规则数组作为文件顶层：
+
+```json
+{
+  "keyword_highlights": [
+    {
+      "id": "deploy-errors",
+      "name": "Deploy Errors",
+      "patterns": ["deploy failed", "rollback required", "fatal"],
+      "color_dark": "#ff7b72",
+      "color_light": "#cf222e",
+      "enabled": true
+    }
+  ]
+}
+```
+
 ### 大输出保护
 
 当某个会话输出量过大时，NyaTerm 会临时进入保护模式，优先保证终端可交互性。
