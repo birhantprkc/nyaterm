@@ -11,7 +11,7 @@ use md5::{Digest as Md5Digest, Md5};
 use opendal::layers::{HttpClientLayer, RetryLayer, TimeoutLayer, TracingLayer};
 use opendal::raw::{HttpBody, HttpClient, HttpFetch};
 use opendal::services::{S3, Webdav};
-use opendal::{Buffer, Error, ErrorKind, Operator};
+use opendal::{Buffer, EntryMode, Error, ErrorKind, Operator};
 use rand::RngCore;
 use sha2::Sha256;
 
@@ -91,6 +91,25 @@ impl CloudRemote {
         match self {
             Self::OpenDal(operator) => operator.delete(path).await.map_err(map_storage_error),
             Self::GiteeSnippet(remote) => remote.delete(path).await,
+        }
+    }
+
+    pub(super) async fn list_files(&self, path: &str) -> AppResult<Vec<String>> {
+        match self {
+            Self::OpenDal(operator) => {
+                let entries = operator.list(path).await.map_err(map_storage_error)?;
+                Ok(entries
+                    .into_iter()
+                    .filter_map(|entry| {
+                        if entry.metadata().mode() == EntryMode::FILE {
+                            Some(entry.path().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect())
+            }
+            Self::GiteeSnippet(remote) => remote.list_files(path).await,
         }
     }
 }
@@ -353,8 +372,18 @@ impl GiteeSnippetRemote {
     }
 
     async fn delete(&self, path: &str) -> AppResult<()> {
-        let _ = path;
-        Ok(())
+        self.delete_file(&gitee_remote_filename(path)).await
+    }
+
+    async fn list_files(&self, path: &str) -> AppResult<Vec<String>> {
+        let snippet = self.fetch_snippet().await?;
+        let prefix = path.trim_start_matches('/');
+        Ok(snippet
+            .files
+            .keys()
+            .filter_map(|filename| gitee_remote_path(filename))
+            .filter(|remote_path| remote_path.starts_with(prefix))
+            .collect())
     }
 
     async fn fetch_snippet(&self) -> AppResult<GiteeSnippet> {
@@ -406,10 +435,20 @@ impl GiteeSnippetRemote {
         let file_value = serde_json::json!({ "content": content });
         let mut files = serde_json::Map::new();
         files.insert(filename.to_string(), file_value);
-        let body = serde_json::json!({
-            "access_token": self.access_token.as_str(),
-            "files": files,
-        });
+        self.patch_files(files).await
+    }
+
+    async fn delete_file(&self, filename: &str) -> AppResult<()> {
+        let mut files = serde_json::Map::new();
+        files.insert(filename.to_string(), serde_json::Value::Null);
+        self.patch_files(files).await
+    }
+
+    async fn patch_files(
+        &self,
+        files: serde_json::Map<String, serde_json::Value>,
+    ) -> AppResult<()> {
+        let body = gitee_patch_body(self.access_token.as_str(), files);
         let url = format!("{}/gists/{}", self.api_endpoint, self.gist_id);
         let response = self
             .client
@@ -430,6 +469,24 @@ fn gitee_remote_filename(path: &str) -> String {
         URL_SAFE_NO_PAD.encode(path.as_bytes()),
         GITEE_REMOTE_FILE_SUFFIX
     )
+}
+
+fn gitee_remote_path(filename: &str) -> Option<String> {
+    let encoded = filename
+        .strip_prefix(GITEE_REMOTE_FILE_PREFIX)?
+        .strip_suffix(GITEE_REMOTE_FILE_SUFFIX)?;
+    let bytes = URL_SAFE_NO_PAD.decode(encoded).ok()?;
+    String::from_utf8(bytes).ok()
+}
+
+fn gitee_patch_body(
+    access_token: &str,
+    files: serde_json::Map<String, serde_json::Value>,
+) -> serde_json::Value {
+    serde_json::json!({
+        "access_token": access_token,
+        "files": files,
+    })
 }
 
 fn decode_gitee_file_content(content: &str) -> AppResult<Vec<u8>> {
@@ -799,6 +856,25 @@ mod tests {
         assert!(filename.starts_with(GITEE_REMOTE_FILE_PREFIX));
         assert!(filename.ends_with(GITEE_REMOTE_FILE_SUFFIX));
         assert!(!filename.contains('/'));
+    }
+
+    #[test]
+    fn gitee_remote_filename_roundtrips_path() {
+        let path = "nyaterm/sync/snapshots/rev.redb.enc";
+        let filename = gitee_remote_filename(path);
+
+        assert_eq!(gitee_remote_path(&filename).as_deref(), Some(path));
+    }
+
+    #[test]
+    fn gitee_delete_patch_body_marks_file_as_null() {
+        let filename = gitee_remote_filename("nyaterm/sync/snapshots/rev.redb.enc");
+        let mut files = serde_json::Map::new();
+        files.insert(filename.clone(), serde_json::Value::Null);
+        let body = gitee_patch_body("token", files);
+
+        assert_eq!(body["access_token"], "token");
+        assert!(body["files"][filename].is_null());
     }
 
     #[test]

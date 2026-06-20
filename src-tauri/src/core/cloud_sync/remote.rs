@@ -10,6 +10,7 @@ use crate::error::{AppError, AppResult};
 
 use super::operator::CloudRemote;
 
+pub(super) const SYNC_CURRENT_FILE: &str = "sync/current.redb.enc";
 pub(super) const SYNC_LATEST_FILE: &str = "sync/latest.redb";
 pub(super) const SYNC_SNAPSHOTS_DIR: &str = "sync/snapshots/";
 pub(super) const BACKUPS_INDEX_FILE: &str = "backups/index.redb";
@@ -40,6 +41,15 @@ pub(super) fn remote_path(base_root: &str, child: &str) -> String {
     } else {
         format!("{root}/{child}")
     }
+}
+
+pub(super) fn legacy_sync_snapshot_file(revision: &str) -> String {
+    format!("{SYNC_SNAPSHOTS_DIR}{revision}.redb.enc")
+}
+
+pub(super) fn is_legacy_sync_snapshot_path(path: &str, base_root: &str) -> bool {
+    let prefix = remote_path(base_root, SYNC_SNAPSHOTS_DIR);
+    path.starts_with(&prefix) && path.ends_with(".redb.enc")
 }
 
 pub(super) fn current_time_ms() -> u64 {
@@ -194,6 +204,26 @@ mod tests {
             "nyaterm/sync/latest.redb"
         );
         assert_eq!(remote_path("", "sync/latest.redb"), "sync/latest.redb");
+    }
+
+    #[test]
+    fn legacy_sync_snapshot_path_helpers_match_old_layout() {
+        assert_eq!(
+            legacy_sync_snapshot_file("rev"),
+            "sync/snapshots/rev.redb.enc"
+        );
+        assert!(is_legacy_sync_snapshot_path(
+            "nyaterm/sync/snapshots/rev.redb.enc",
+            "nyaterm"
+        ));
+        assert!(!is_legacy_sync_snapshot_path(
+            "nyaterm/sync/current.redb.enc",
+            "nyaterm"
+        ));
+        assert!(!is_legacy_sync_snapshot_path(
+            "nyaterm/backups/snapshots/rev.redb.enc",
+            "nyaterm"
+        ));
     }
 
     #[test]

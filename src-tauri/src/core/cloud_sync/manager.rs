@@ -17,12 +17,13 @@ use super::crypto::{decrypt_snapshot_bytes, encrypt_snapshot_bytes, require_mast
 use super::history_log::{log_history_entry, read_cloud_sync_history_from_logs};
 use super::operator::{build_remote, ensure_remote_layout};
 use super::remote::{
-    BACKUPS_SNAPSHOTS_DIR, RemoteSyncPointer, SYNC_SNAPSHOTS_DIR, current_time_ms, elapsed_ms,
+    BACKUPS_SNAPSHOTS_DIR, RemoteSyncPointer, SYNC_CURRENT_FILE, SYNC_SNAPSHOTS_DIR,
+    current_time_ms, elapsed_ms, is_legacy_sync_snapshot_path, legacy_sync_snapshot_file,
     load_backup_index, load_sync_pointer, remote_path, write_backup_index, write_sync_pointer,
 };
 
 use crate::core::portable_snapshot::{
-    PortableSnapshotKind, apply_portable_snapshot, build_portable_snapshot,
+    PortableSnapshot, PortableSnapshotKind, apply_portable_snapshot, build_portable_snapshot,
     decode_portable_snapshot, encode_portable_snapshot,
 };
 
@@ -666,13 +667,7 @@ impl CloudSyncManager {
             ));
         }
 
-        let encoded = encode_portable_snapshot(&envelope)?;
-        let encrypted = encrypt_snapshot_bytes(&encoded)?;
-        let snapshot_path = remote_path(
-            &settings.remote_root,
-            &format!("{SYNC_SNAPSHOTS_DIR}{}.redb.enc", envelope.revision_id),
-        );
-        remote.write(&snapshot_path, encrypted).await?;
+        write_current_sync_snapshot(&remote, &settings.remote_root, &envelope).await?;
 
         let pointer = RemoteSyncPointer {
             revision_id: envelope.revision_id.clone(),
@@ -682,6 +677,7 @@ impl CloudSyncManager {
             app_version: envelope.app_version.clone(),
         };
         write_sync_pointer(&remote, &settings.remote_root, &pointer).await?;
+        cleanup_legacy_sync_snapshots(&remote, &settings.remote_root).await;
 
         {
             let mut state = self.state.lock().await;
@@ -803,14 +799,10 @@ impl CloudSyncManager {
             ));
         }
 
-        let snapshot_path = remote_path(
-            &settings.remote_root,
-            &format!("{SYNC_SNAPSHOTS_DIR}{}.redb.enc", latest.revision_id),
-        );
-        let raw = remote.read(&snapshot_path).await?;
-        let decrypted = decrypt_snapshot_bytes(raw.as_slice())?;
-        let envelope = decode_portable_snapshot(&decrypted)?;
+        let envelope = read_sync_snapshot(&remote, &settings.remote_root, &latest).await?;
         apply_portable_snapshot(&self.app()?, &envelope).await?;
+        write_current_sync_snapshot(&remote, &settings.remote_root, &envelope).await?;
+        cleanup_legacy_sync_snapshots(&remote, &settings.remote_root).await;
 
         {
             let mut state = self.state.lock().await;
@@ -1084,6 +1076,76 @@ where
                 ),
             ))
         })?
+}
+
+async fn write_current_sync_snapshot(
+    remote: &super::operator::CloudRemote,
+    remote_root: &str,
+    envelope: &PortableSnapshot,
+) -> AppResult<()> {
+    let encoded = encode_portable_snapshot(envelope)?;
+    let encrypted = encrypt_snapshot_bytes(&encoded)?;
+    remote
+        .write(&remote_path(remote_root, SYNC_CURRENT_FILE), encrypted)
+        .await
+}
+
+async fn read_sync_snapshot(
+    remote: &super::operator::CloudRemote,
+    remote_root: &str,
+    pointer: &RemoteSyncPointer,
+) -> AppResult<PortableSnapshot> {
+    if let Some(raw) = remote
+        .read_if_exists(&remote_path(remote_root, SYNC_CURRENT_FILE))
+        .await?
+    {
+        let envelope = decode_remote_sync_snapshot(&raw)?;
+        if envelope.revision_id == pointer.revision_id {
+            return Ok(envelope);
+        }
+
+        tracing::warn!(
+            current_revision = %envelope.revision_id,
+            pointer_revision = %pointer.revision_id,
+            "Cloud sync current snapshot revision differs from latest pointer; trying legacy revision path"
+        );
+    }
+
+    let legacy_path = remote_path(
+        remote_root,
+        &legacy_sync_snapshot_file(&pointer.revision_id),
+    );
+    let raw = remote.read(&legacy_path).await?;
+    decode_remote_sync_snapshot(&raw)
+}
+
+fn decode_remote_sync_snapshot(raw: &[u8]) -> AppResult<PortableSnapshot> {
+    let decrypted = decrypt_snapshot_bytes(raw)?;
+    decode_portable_snapshot(&decrypted)
+}
+
+async fn cleanup_legacy_sync_snapshots(remote: &super::operator::CloudRemote, remote_root: &str) {
+    let prefix = remote_path(remote_root, SYNC_SNAPSHOTS_DIR);
+    let paths = match remote.list_files(&prefix).await {
+        Ok(paths) => paths,
+        Err(error) => {
+            tracing::warn!("Failed to list legacy cloud sync snapshots: {}", error);
+            return;
+        }
+    };
+
+    for path in paths
+        .into_iter()
+        .filter(|path| is_legacy_sync_snapshot_path(path, remote_root))
+    {
+        if let Err(error) = remote.delete(&path).await {
+            tracing::warn!(
+                path = %path,
+                error = %error,
+                "Failed to delete legacy cloud sync snapshot"
+            );
+        }
+    }
 }
 
 fn is_automatic_trigger(trigger: &str) -> bool {
