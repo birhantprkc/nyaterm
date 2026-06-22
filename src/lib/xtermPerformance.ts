@@ -1,9 +1,23 @@
+import { isMacOS } from "./platform";
+
 export const XTERM_PERFORMANCE_CONFIG = {
   highlighting: {
     /** Debounce delay in ms before re-scanning after new output is written. */
     debounceMs: 80,
     /** Throttle interval in ms for scroll-triggered viewport refreshes. */
     throttleMs: 80,
+    /** Lines above and below the viewport to keep decorated on most platforms. */
+    overscanLines: 50,
+    /** macOS WebView benefits from a slightly smaller highlighted active zone. */
+    macosOverscanLines: 40,
+    /** Hard cap for total keyword highlight decorations held by one terminal. */
+    maxDecorations: 1_000,
+    /** Hard cap for new keyword highlight decorations created by one refresh. */
+    maxDecorationsPerRefresh: 500,
+    /** Hard cap for accepted keyword highlight matches on one physical line. */
+    maxMatchesPerLine: 20,
+    /** Main-thread time budget for one viewport refresh. */
+    maxRefreshTimeMs: 12,
   },
   output: {
     /** Max characters to write into xterm in a single call. */
@@ -28,3 +42,11 @@ export const XTERM_PERFORMANCE_CONFIG = {
     recoveryNoticeMs: 3_000,
   },
 } as const;
+
+export function getKeywordHighlightPerformanceConfig() {
+  const highlighting = XTERM_PERFORMANCE_CONFIG.highlighting;
+  return {
+    ...highlighting,
+    resolvedOverscanLines: isMacOS ? highlighting.macosOverscanLines : highlighting.overscanLines,
+  };
+}

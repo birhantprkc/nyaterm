@@ -7,7 +7,7 @@ import type {
   Terminal as XTerm,
 } from "@xterm/xterm";
 import type { ResolvedHighlightRule } from "./keywordHighlightPresets";
-import { XTERM_PERFORMANCE_CONFIG } from "./xtermPerformance";
+import { getKeywordHighlightPerformanceConfig, XTERM_PERFORMANCE_CONFIG } from "./xtermPerformance";
 
 interface CompiledRule {
   regex: RegExp;
@@ -28,11 +28,19 @@ interface LogicalLineSegment {
   cellMap: number[] | null;
 }
 
+type KeywordHighlightPerformanceConfig = ReturnType<typeof getKeywordHighlightPerformanceConfig>;
+
+interface RefreshBudget {
+  createdDecorations: number;
+  deadlineMs: number;
+  hitLimit: boolean;
+}
+
 /**
  * Manages terminal decorations for keyword highlighting.
  *
  * Optimizations over a naive implementation:
- * - Overscan buffer: keeps decorations alive for OVERSCAN_LINES rows above/below the
+ * - Overscan buffer: keeps decorations alive for configured rows above/below the
  *   viewport, eliminating highlight loss when scrolling back to recently-visited rows.
  * - Scanned-line memoization: scrollback content is immutable once written, so each line
  *   or fully-scrollback wrapped logical line is regex-matched exactly once. Subsequent
@@ -65,12 +73,6 @@ export class KeywordHighlighter implements IDisposable {
   private sentinelDisposable: IDisposable | null = null;
   private bufferTrimmed = false;
 
-  /**
-   * How many lines above and below the visible viewport to keep decorated.
-   * Large enough to absorb typical keyboard/mouse scroll bursts without flicker,
-   * small enough to bound memory usage on large scrollback buffers.
-   */
-  private static readonly OVERSCAN_LINES = 120;
   private static readonly MAX_LOGICAL_LINE_SCAN_CHARS = 16 * 1024;
 
   constructor(term: XTerm) {
@@ -326,17 +328,93 @@ export class KeywordHighlighter implements IDisposable {
     return { startY, endY };
   }
 
+  private isBudgetExpired(budget: RefreshBudget): boolean {
+    if (performance.now() <= budget.deadlineMs) return false;
+    budget.hitLimit = true;
+    return true;
+  }
+
+  private isBudgetExhausted(budget: RefreshBudget): boolean {
+    return budget.hitLimit || this.isBudgetExpired(budget);
+  }
+
+  private canCreateDecoration(
+    config: KeywordHighlightPerformanceConfig,
+    budget: RefreshBudget,
+  ): boolean {
+    if (this.decorationCache.size >= config.maxDecorations) {
+      budget.hitLimit = true;
+      return false;
+    }
+    if (budget.createdDecorations >= config.maxDecorationsPerRefresh) {
+      budget.hitLimit = true;
+      return false;
+    }
+    return !this.isBudgetExhausted(budget);
+  }
+
+  private hasAnsiForegroundInRange(
+    line: IBufferLine,
+    start: number,
+    end: number,
+    cellMap: number[] | null,
+    scratchCell: IBufferCell,
+  ): boolean {
+    for (let i = start; i < end; i++) {
+      const cellCol = cellMap ? (cellMap[i] ?? i) : i;
+      const cell = line.getCell(cellCol, scratchCell);
+      if (cell && !cell.isFgDefault()) return true;
+    }
+    return false;
+  }
+
+  private hasWrappedAnsiForegroundInRange(
+    segments: LogicalLineSegment[],
+    start: number,
+    end: number,
+    scratchCell: IBufferCell,
+  ): boolean {
+    for (const segment of segments) {
+      if (segment.endIndex <= start || segment.startIndex >= end) continue;
+
+      const localStart = Math.max(start, segment.startIndex) - segment.startIndex;
+      const localEnd = Math.min(end, segment.endIndex) - segment.startIndex;
+      if (
+        this.hasAnsiForegroundInRange(
+          segment.line,
+          localStart,
+          localEnd,
+          segment.cellMap,
+          scratchCell,
+        )
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private getLineYFromDecorationKey(key: string): number | null {
+    const separatorIndex = key.indexOf(":");
+    if (separatorIndex <= 0) return null;
+    const lineY = Number(key.slice(0, separatorIndex));
+    return Number.isFinite(lineY) ? lineY : null;
+  }
+
   private ensureDecoration(
     lineY: number,
     cellStartCol: number,
     cellWidth: number,
     color: string,
     cursorAbsoluteY: number,
+    config: KeywordHighlightPerformanceConfig,
+    budget: RefreshBudget,
   ): string | null {
     if (cellWidth <= 0) return null;
 
     const key = `${lineY}:${cellStartCol}:${cellWidth}:${color}`;
     if (this.decorationCache.has(key)) return key;
+    if (!this.canCreateDecoration(config, budget)) return null;
 
     const offset = lineY - cursorAbsoluteY;
     const marker = this.term.registerMarker(offset);
@@ -375,6 +453,7 @@ export class KeywordHighlighter implements IDisposable {
     });
 
     this.decorationCache.set(key, { decoration: deco, marker });
+    budget.createdDecorations++;
     return key;
   }
 
@@ -384,6 +463,8 @@ export class KeywordHighlighter implements IDisposable {
     cursorAbsoluteY: number,
     requiredKeys: Set<string>,
     scratchCell: IBufferCell,
+    config: KeywordHighlightPerformanceConfig,
+    budget: RefreshBudget,
   ): string[] {
     const maxCols = Math.min(line.length, this.term.cols);
     const lineText = line.translateToString(true, 0, maxCols);
@@ -398,22 +479,14 @@ export class KeywordHighlighter implements IDisposable {
     // Track occupied characters in the string to prevent multi-rule overlapping
     const occupied = new Uint8Array(lineText.length);
 
-    // Pre-fill occupied array with cells that already have a custom foreground color
-    // so we don't override the original shell output colors (e.g. from `ls --color`).
-    for (let i = 0; i < lineText.length; i++) {
-      const cellCol = cellMap ? (cellMap[i] ?? i) : i;
-      const cell = line.getCell(cellCol, scratchCell);
-      if (cell && !cell.isFgDefault()) {
-        occupied[i] = 1;
-      }
-    }
-
     const lineKeys: string[] = [];
 
     for (const { regex, color } of this.compiledRules) {
+      if (lineKeys.length >= config.maxMatchesPerLine || this.isBudgetExhausted(budget)) break;
       regex.lastIndex = 0;
 
       while (true) {
+        if (lineKeys.length >= config.maxMatchesPerLine || this.isBudgetExhausted(budget)) break;
         const match = regex.exec(lineText);
         if (match === null) break;
 
@@ -426,7 +499,7 @@ export class KeywordHighlighter implements IDisposable {
         const strStart = match.index;
         const strEnd = strStart + match[0].length;
 
-        // Check for collision with higher-priority matches or existing ANSI colors
+        // Check for collision with higher-priority matches.
         let isOverlapping = false;
         for (let k = strStart; k < strEnd; k++) {
           if (occupied[k]) {
@@ -436,10 +509,8 @@ export class KeywordHighlighter implements IDisposable {
         }
         if (isOverlapping) continue;
 
-        // Mark as occupied
-        for (let k = strStart; k < strEnd; k++) {
-          occupied[k] = 1;
-        }
+        // Avoid overriding original shell output colors (e.g. from `ls --color`).
+        if (this.hasAnsiForegroundInRange(line, strStart, strEnd, cellMap, scratchCell)) continue;
 
         const cellStartCol = cellMap ? (cellMap[strStart] ?? strStart) : strStart;
         const cellEndCol = cellMap ? (cellMap[strEnd] ?? strEnd) : strEnd;
@@ -449,8 +520,18 @@ export class KeywordHighlighter implements IDisposable {
           cellEndCol - cellStartCol,
           color,
           cursorAbsoluteY,
+          config,
+          budget,
         );
-        if (!key) continue;
+        if (!key) {
+          if (budget.hitLimit) break;
+          continue;
+        }
+
+        // Mark as occupied only after the highlight has been accepted.
+        for (let k = strStart; k < strEnd; k++) {
+          occupied[k] = 1;
+        }
 
         requiredKeys.add(key);
         lineKeys.push(key);
@@ -469,6 +550,8 @@ export class KeywordHighlighter implements IDisposable {
     cursorAbsoluteY: number,
     requiredKeys: Set<string>,
     scratchCell: IBufferCell,
+    config: KeywordHighlightPerformanceConfig,
+    budget: RefreshBudget,
   ): Map<number, string[]> {
     const segments: LogicalLineSegment[] = [];
     let logicalLength = 0;
@@ -503,22 +586,15 @@ export class KeywordHighlighter implements IDisposable {
     }
     const occupied = new Uint8Array(logicalText.length);
 
-    for (const segment of segments) {
-      for (let i = 0; i < segment.text.length; i++) {
-        const cellCol = segment.cellMap ? (segment.cellMap[i] ?? i) : i;
-        const cell = segment.line.getCell(cellCol, scratchCell);
-        if (cell && !cell.isFgDefault()) {
-          occupied[segment.startIndex + i] = 1;
-        }
-      }
-    }
-
     const lineKeysByLine = new Map<number, string[]>();
+    const acceptedMatchesByLine = new Map<number, number>();
 
     for (const { regex, color } of this.compiledRules) {
+      if (this.isBudgetExhausted(budget)) break;
       regex.lastIndex = 0;
 
       while (true) {
+        if (this.isBudgetExhausted(budget)) break;
         const match = regex.exec(logicalText);
         if (match === null) break;
 
@@ -538,15 +614,29 @@ export class KeywordHighlighter implements IDisposable {
           }
         }
         if (isOverlapping) continue;
+        if (this.hasWrappedAnsiForegroundInRange(segments, strStart, strEnd, scratchCell)) continue;
 
-        for (let k = strStart; k < strEnd; k++) {
-          occupied[k] = 1;
+        const matchedSegments = segments.filter(
+          (segment) =>
+            segment.lineY >= scanStart &&
+            segment.lineY <= scanEnd &&
+            segment.endIndex > strStart &&
+            segment.startIndex < strEnd,
+        );
+        if (matchedSegments.length === 0) continue;
+
+        let lineLimitReached = false;
+        for (const segment of matchedSegments) {
+          const acceptedCount = acceptedMatchesByLine.get(segment.lineY) ?? 0;
+          if (acceptedCount >= config.maxMatchesPerLine) {
+            lineLimitReached = true;
+            break;
+          }
         }
+        if (lineLimitReached) continue;
 
-        for (const segment of segments) {
-          if (segment.lineY < scanStart || segment.lineY > scanEnd) continue;
-          if (segment.endIndex <= strStart || segment.startIndex >= strEnd) continue;
-
+        const createdKeys: Array<{ lineY: number; key: string }> = [];
+        for (const segment of matchedSegments) {
           const localStart = Math.max(strStart, segment.startIndex) - segment.startIndex;
           const localEnd = Math.min(strEnd, segment.endIndex) - segment.startIndex;
           if (localEnd <= localStart) continue;
@@ -561,10 +651,16 @@ export class KeywordHighlighter implements IDisposable {
             cellEndCol - cellStartCol,
             color,
             cursorAbsoluteY,
+            config,
+            budget,
           );
-          if (!key) continue;
+          if (!key) {
+            if (budget.hitLimit) break;
+            continue;
+          }
 
           requiredKeys.add(key);
+          createdKeys.push({ lineY: segment.lineY, key });
 
           const lineKeys = lineKeysByLine.get(segment.lineY);
           if (lineKeys) {
@@ -572,6 +668,18 @@ export class KeywordHighlighter implements IDisposable {
           } else {
             lineKeysByLine.set(segment.lineY, [key]);
           }
+        }
+
+        if (createdKeys.length === 0) {
+          if (budget.hitLimit) break;
+          continue;
+        }
+
+        for (let k = strStart; k < strEnd; k++) {
+          occupied[k] = 1;
+        }
+        for (const { lineY } of createdKeys) {
+          acceptedMatchesByLine.set(lineY, (acceptedMatchesByLine.get(lineY) ?? 0) + 1);
         }
       }
     }
@@ -614,22 +722,28 @@ export class KeywordHighlighter implements IDisposable {
     // Lines below this index are in the scrollback and are immutable.
     // Lines on the current screen (>= screenStartY) may still change via escape sequences.
     const screenStartY = buffer.baseY;
+    const config = getKeywordHighlightPerformanceConfig();
+    const budget: RefreshBudget = {
+      createdDecorations: 0,
+      deadlineMs: performance.now() + config.maxRefreshTimeMs,
+      hitLimit: false,
+    };
 
     // Expand the active zone with overscan so decorations survive typical scroll bursts
     // without being destroyed and recreated, eliminating highlight flicker.
-    const scanStart = Math.max(0, viewportY - KeywordHighlighter.OVERSCAN_LINES);
-    const scanEnd = Math.min(
-      totalLines - 1,
-      viewportY + rows - 1 + KeywordHighlighter.OVERSCAN_LINES,
-    );
+    const scanStart = Math.max(0, viewportY - config.resolvedOverscanLines);
+    const scanEnd = Math.min(totalLines - 1, viewportY + rows - 1 + config.resolvedOverscanLines);
 
     const requiredKeys = new Set<string>();
+    const processedLines = new Set<number>();
     const scratchCell = buffer.getNullCell();
     const processedLogicalStarts = new Set<number>();
 
     for (let lineY = scanStart; lineY <= scanEnd; lineY++) {
+      if (this.isBudgetExhausted(budget)) break;
       const line = buffer.getLine(lineY);
       if (!line) continue;
+      processedLines.add(lineY);
 
       if (!this.highlightAcrossWrappedLines) {
         if (lineY < screenStartY && this.scannedLines.has(lineY)) {
@@ -657,6 +771,8 @@ export class KeywordHighlighter implements IDisposable {
           cursorAbsoluteY,
           requiredKeys,
           scratchCell,
+          config,
+          budget,
         );
 
         // Only memoize scrollback lines — screen lines remain mutable
@@ -699,6 +815,13 @@ export class KeywordHighlighter implements IDisposable {
       if (!canMemoize) {
         processedLogicalStarts.add(startY);
       }
+      for (
+        let processedY = Math.max(startY, scanStart);
+        processedY <= Math.min(endY, scanEnd);
+        processedY++
+      ) {
+        processedLines.add(processedY);
+      }
 
       const lineKeysByLine = this.scanWrappedLogicalLine(
         buffer,
@@ -709,6 +832,8 @@ export class KeywordHighlighter implements IDisposable {
         cursorAbsoluteY,
         requiredKeys,
         scratchCell,
+        config,
+        budget,
       );
 
       if (canMemoize) {
@@ -724,12 +849,16 @@ export class KeywordHighlighter implements IDisposable {
       }
     }
 
-    // Evict decorations that have drifted outside the overscan zone.
-    // Lines within [scanStart, scanEnd] are always in requiredKeys (content is immutable),
-    // so anything missing from requiredKeys belongs to a line that has left the zone.
+    // Evict decorations that have drifted outside the overscan zone. If the refresh
+    // hit a time/count budget, keep unprocessed in-zone lines to avoid flicker and churn.
     const staleKeys: string[] = [];
     for (const key of this.decorationCache.keys()) {
-      if (!requiredKeys.has(key)) staleKeys.push(key);
+      if (requiredKeys.has(key)) continue;
+      const lineY = this.getLineYFromDecorationKey(key);
+      const isOutsideScanZone = lineY === null || lineY < scanStart || lineY > scanEnd;
+      if (isOutsideScanZone || !budget.hitLimit || processedLines.has(lineY)) {
+        staleKeys.push(key);
+      }
     }
     for (const key of staleKeys) {
       const entry = this.decorationCache.get(key);
