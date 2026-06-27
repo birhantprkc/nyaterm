@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { MdClose, MdKeyboardArrowDown, MdKeyboardArrowUp } from "react-icons/md";
+import type { TerminalSearchState } from "@/lib/terminalSearch";
 
 interface TerminalSearchBarProps {
   show: boolean;
   searchQuery: string;
+  searchState: TerminalSearchState;
   setSearchQuery: (val: string) => void;
   onNext: () => void;
   onPrev: () => void;
@@ -14,6 +16,7 @@ interface TerminalSearchBarProps {
 export default function TerminalSearchBar({
   show,
   searchQuery,
+  searchState,
   setSearchQuery,
   onNext,
   onPrev,
@@ -27,6 +30,8 @@ export default function TerminalSearchBar({
       inputRef.current?.focus();
     }
   }, [show]);
+
+  const statusLabel = useMemo(() => getStatusLabel(searchState, t), [searchState, t]);
 
   if (!show) return null;
 
@@ -49,7 +54,6 @@ export default function TerminalSearchBar({
         value={searchQuery}
         onChange={(e) => {
           setSearchQuery(e.target.value);
-          // the parent handles finding Next on query change
         }}
         onKeyDown={(e) => {
           if (e.key === "Enter") {
@@ -60,24 +64,69 @@ export default function TerminalSearchBar({
           }
         }}
       />
+      {statusLabel && (
+        <span
+          className="min-w-10 text-right text-[11px] whitespace-nowrap"
+          style={{
+            color: searchState.status === "error" ? "var(--df-danger)" : "var(--df-text-muted)",
+          }}
+          title={searchState.error ?? statusLabel}
+        >
+          {statusLabel}
+        </span>
+      )}
       <MdKeyboardArrowUp
         className="text-sm cursor-pointer hover:opacity-80"
         style={{ color: "var(--df-text-muted)" }}
         onClick={onPrev}
-        title="Previous"
+        title={t("terminalCtx.findPrevious")}
       />
       <MdKeyboardArrowDown
         className="text-sm cursor-pointer hover:opacity-80"
         style={{ color: "var(--df-text-muted)" }}
         onClick={onNext}
-        title="Next"
+        title={t("terminalCtx.findNext")}
       />
       <MdClose
         className="text-sm cursor-pointer hover:opacity-80"
         style={{ color: "var(--df-text-muted)" }}
         onClick={onClose}
-        title="Close"
+        title={t("about.close")}
       />
     </div>
   );
+}
+
+function getStatusLabel(searchState: TerminalSearchState, t: (key: string) => string) {
+  if (!searchState.query) {
+    return null;
+  }
+
+  if (searchState.status === "pending" || searchState.status === "searching") {
+    return t("terminalCtx.findSearching");
+  }
+
+  if (searchState.status === "error") {
+    return searchState.isRegexValid
+      ? t("terminalCtx.findError")
+      : t("terminalCtx.findInvalidRegex");
+  }
+
+  if (searchState.status === "not-found") {
+    return t("terminalCtx.findNoResults");
+  }
+
+  if (searchState.status !== "found") {
+    return null;
+  }
+
+  if (searchState.resultCount === null) {
+    return t("terminalCtx.findFound");
+  }
+
+  if (searchState.activeIndex === null) {
+    return String(searchState.resultCount);
+  }
+
+  return `${searchState.activeIndex + 1}/${searchState.resultCount}`;
 }

@@ -354,10 +354,17 @@ export default function XTerminal({
     setShowSearchBar,
     searchQuery,
     setSearchQuery,
+    searchState,
     handleSearchNext,
     handleSearchPrev,
     handleCloseSearch,
-  } = useTerminalSearch(terminalRef);
+  } = useTerminalSearch(terminalRef, {
+    terminal: terminalInstance,
+    visible: visible && active,
+    performanceMode,
+    incremental: true,
+    decorationPolicy: "navigation",
+  });
 
   // Shell integration state
   const { shellIntegrationRef } = useShellIntegration();
@@ -2084,14 +2091,13 @@ export default function XTerminal({
 
   const doFind = useCallback(
     (selection?: string) => {
+      setShowSearchBar(true);
       if (selection) {
         setSearchQuery(selection);
-        setTimeout(() => searchAddonRef.current?.findNext(selection), 50);
+        handleSearchNext(selection);
       }
-      setShowSearchBar(true);
-      terminalRef.current?.focus();
     },
-    [setShowSearchBar, setSearchQuery, searchAddonRef],
+    [handleSearchNext, setShowSearchBar, setSearchQuery],
   );
 
   const handlePasteText = useCallback((text: string) => {
@@ -2266,6 +2272,7 @@ export default function XTerminal({
         <TerminalSearchBar
           show={showSearchBar}
           searchQuery={searchQuery}
+          searchState={searchState}
           setSearchQuery={setSearchQuery}
           onNext={handleSearchNext}
           onPrev={handleSearchPrev}
