@@ -173,6 +173,8 @@ pub struct PortableAppSettings {
     pub interaction: InteractionSettings,
     pub transfer: TransferSettings,
     pub diagnostics: DiagnosticsSettings,
+    #[serde(default)]
+    pub ai: config::AiSettings,
     pub ui: PortableUiSettings,
 }
 
@@ -191,6 +193,7 @@ impl PortableAppSettings {
             interaction: settings.interaction.clone(),
             transfer: settings.transfer.clone(),
             diagnostics: settings.diagnostics.clone(),
+            ai: settings.ai.clone(),
             ui: PortableUiSettings {
                 language: settings.ui.language.clone(),
                 show_remote_stats: settings.ui.show_remote_stats,
@@ -216,6 +219,8 @@ impl PortableAppSettings {
         current.interaction = self.interaction;
         current.transfer = self.transfer;
         current.diagnostics = self.diagnostics;
+        current.ai = self.ai;
+        config::normalize_ai_settings(&mut current.ai);
         current.ui.language = self.ui.language;
         current.ui.show_remote_stats = self.ui.show_remote_stats;
         current.ui.remote_stats_interval = self.ui.remote_stats_interval;
@@ -849,11 +854,15 @@ mod tests {
         current.security.master_password = Some("encrypted-master".to_string());
         current.ui.left_width = 444.0;
         current.ui.active_left_panel = Some("fileExplorer".to_string());
+        current.ai.active_profile_id = "local-profile".to_string();
+        current.ai.provider_profiles[0].api_key = Some("local-key".to_string());
 
         let mut updated = PortableAppSettings::from_app_settings(&current);
         updated.general.startup_restore = false;
         updated.ui.language = Some("zh-CN".to_string());
         updated.ui.saved_connections_sort_mode = "name-asc".to_string();
+        updated.ai.active_profile_id = "synced-profile".to_string();
+        updated.ai.provider_profiles[0].api_key = Some("synced-key".to_string());
 
         let merged = updated.apply_to(current.clone());
         assert_eq!(
@@ -864,6 +873,11 @@ mod tests {
         assert_eq!(merged.ui.active_left_panel, current.ui.active_left_panel);
         assert_eq!(merged.ui.language.as_deref(), Some("zh-CN"));
         assert_eq!(merged.ui.saved_connections_sort_mode, "name-asc");
+        assert_eq!(merged.ai.active_profile_id, "synced-profile");
+        assert_eq!(
+            merged.ai.provider_profiles[0].api_key.as_deref(),
+            Some("synced-key")
+        );
     }
 
     fn sample_portable_settings() -> PortableAppSettings {
@@ -878,6 +892,7 @@ mod tests {
             interaction: config::InteractionSettings::default(),
             transfer: config::TransferSettings::default(),
             diagnostics: config::DiagnosticsSettings::default(),
+            ai: config::AiSettings::default(),
             ui: PortableUiSettings {
                 language: Some("en".to_string()),
                 show_remote_stats: false,
@@ -937,6 +952,25 @@ mod tests {
         assert_eq!(decoded.payload_hash, snapshot.payload_hash);
         assert_eq!(decoded.master_key_token, snapshot.master_key_token);
         assert_eq!(decoded.known_hosts, snapshot.known_hosts);
+    }
+
+    #[test]
+    fn portable_settings_deserializes_legacy_shape_without_ai() {
+        let settings = sample_portable_settings();
+        let mut raw = serde_json::to_value(&settings).expect("settings json");
+        raw.as_object_mut().expect("settings object").remove("ai");
+
+        let decoded: PortableAppSettings =
+            serde_json::from_value(raw).expect("legacy settings decode");
+
+        assert_eq!(
+            decoded.ai.schema_version,
+            config::AiSettings::default().schema_version
+        );
+        assert_eq!(
+            decoded.ai.active_profile_id,
+            config::AiSettings::default().active_profile_id
+        );
     }
 
     #[test]
