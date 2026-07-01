@@ -207,8 +207,8 @@ export function SerialForm({
 
   return (
     <div className="space-y-3 w-full">
-      <div className="flex flex-wrap gap-3">
-        <div className="min-w-[14rem] flex-[2_1_15rem]">
+      <div className="grid grid-cols-[minmax(0,1fr)_9rem] gap-3">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.serialPort", "Serial Port")}
             <RequiredMark />
@@ -258,15 +258,15 @@ export function SerialForm({
             <p className="mt-1 text-[0.6875rem] text-destructive">{serialPortsError}</p>
           )}
         </div>
-        <div className="min-w-[9rem] flex-[1_1_9rem]">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.baudRate", "Baud Rate")}
           </Label>
           <BaudRatePicker value={baudRate} onValueChange={setBaudRate} />
         </div>
       </div>
-      <div className="flex flex-wrap gap-3">
-        <div className="min-w-[7rem] flex-[0.9_1_7rem]">
+      <div className="grid grid-cols-[4.5rem_minmax(8rem,1fr)_4.5rem_10rem] gap-3">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.dataBits", "Data Bits")}
           </Label>
@@ -282,7 +282,7 @@ export function SerialForm({
             </SelectContent>
           </Select>
         </div>
-        <div className="min-w-[10rem] flex-[1.4_1_10rem]">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.parity", "Parity")}
           </Label>
@@ -299,7 +299,7 @@ export function SerialForm({
             </SelectContent>
           </Select>
         </div>
-        <div className="min-w-[7rem] flex-[0.9_1_7rem]">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.stopBits", "Stop Bits")}
           </Label>
@@ -314,9 +314,7 @@ export function SerialForm({
             </SelectContent>
           </Select>
         </div>
-      </div>
-      <div className="flex flex-wrap gap-3">
-        <div className="min-w-[10rem] flex-[1_1_10rem]">
+        <div className="min-w-0">
           <Label className="text-xs font-medium text-foreground/80">
             {t("dialog.backspaceMode", "Backspace Mode")}
           </Label>
